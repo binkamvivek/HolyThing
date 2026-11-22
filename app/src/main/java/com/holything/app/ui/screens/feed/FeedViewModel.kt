@@ -27,6 +27,7 @@ data class FeedUiState(
     val totalCount: Int = 0,
     val isLoading: Boolean = true,
     val isSyncing: Boolean = false,
+    val isRefreshing: Boolean = false,
     val isOffline: Boolean = false,
     val syncStatusMessage: String = "Ready",
     val showSupportBanner: Boolean = false,
@@ -43,6 +44,7 @@ class FeedViewModel @Inject constructor(
 
     private val isLoadingFlow = MutableStateFlow(true)
     private val isSyncingFlow = MutableStateFlow(false)
+    private val isRefreshingFlow = MutableStateFlow(false)
     private val isOfflineFlow = MutableStateFlow(false)
     private val statusMessageFlow = MutableStateFlow("Loading scripture...")
 
@@ -57,6 +59,7 @@ class FeedViewModel @Inject constructor(
     private data class SyncStatus(
         val loading: Boolean,
         val syncing: Boolean,
+        val refreshing: Boolean,
         val offline: Boolean,
         val message: String
     )
@@ -64,10 +67,11 @@ class FeedViewModel @Inject constructor(
     private val syncStatusFlow = combine(
         isLoadingFlow,
         isSyncingFlow,
+        isRefreshingFlow,
         isOfflineFlow,
         statusMessageFlow
-    ) { loading, syncing, offline, msg ->
-        SyncStatus(loading, syncing, offline, msg)
+    ) { loading, syncing, refreshing, offline, msg ->
+        SyncStatus(loading, syncing, refreshing, offline, msg)
     }
 
     private data class UserPreferencesState(
@@ -99,6 +103,7 @@ class FeedViewModel @Inject constructor(
             totalCount = count,
             isLoading = status.loading && items.isEmpty(),
             isSyncing = status.syncing,
+            isRefreshing = status.refreshing,
             isOffline = status.offline,
             syncStatusMessage = status.message,
             showSupportBanner = shouldShowSupport,
@@ -258,6 +263,39 @@ class FeedViewModel @Inject constructor(
     fun dismissMoodRecheck() {
         viewModelScope.launch {
             dataStore.resetSwipeCount()
+        }
+    }
+
+    /**
+     * Pull-to-refresh triggered from Home screen:
+     * Syncs fresh content, picks a new distinct featured post, and prepares the feed.
+     */
+    fun onPullToRefresh() {
+        viewModelScope.launch {
+            isRefreshingFlow.value = true
+            try {
+                repository.syncContent()
+            } catch (e: Exception) {
+                // Ignore network errors in offline mode
+            }
+
+            val freshFeed = repository.getFeedCards().first()
+            if (freshFeed.isNotEmpty()) {
+                val currentTopId = _feedItemsFlow.value.firstOrNull()?.card?.id
+                // Pick a different card so the home screen post visually changes!
+                val candidates = freshFeed.filter { it.card.id != currentTopId }
+                val newTop = if (candidates.isNotEmpty()) {
+                    candidates.random()
+                } else {
+                    freshFeed.first()
+                }
+                val remaining = freshFeed.filter { it.card.id != newTop.card.id }
+                _feedItemsFlow.value = listOf(newTop) + remaining
+                currentPageIndex = 0
+            }
+            kotlinx.coroutines.delay(400) // Natural settle time for pull-to-refresh spinner
+            isRefreshingFlow.value = false
+            _userFeedbackEvent.emit("New passage for you")
         }
     }
 }
