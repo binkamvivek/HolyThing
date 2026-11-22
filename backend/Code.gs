@@ -19,7 +19,7 @@ const CONFIG = {
   ERRORS_SHEET_NAME: 'Errors',
   
   // Rate limiting & execution limits
-  API_DELAY_MS: 150, // Utilities.sleep between calls to respect bible-api.com
+  API_DELAY_MS: 700, // Utilities.sleep between calls to respect bible-api.com rate limits
   MAX_EXECUTION_TIME_MS: 4.5 * 60 * 1000, // 4.5 minutes (Apps Script timeout is 6 mins)
   CHUNK_CACHE_SIZE: 90000, // Apps Script cache limit is 100KB per key
   CACHE_EXPIRATION_SEC: 21600, // 6 hours
@@ -114,22 +114,18 @@ function fillVerseText() {
     return;
   }
   
-  const scriptProps = PropertiesService.getScriptProperties();
-  const savedRow = parseInt(scriptProps.getProperty(CONFIG.PROP_LAST_ROW) || '2', 10);
-  const startRow = (savedRow >= 2 && savedRow <= data.length) ? savedRow : 2;
-  
   let filledCount = 0;
   let skippedCount = 0;
   let errorCount = 0;
   let stoppedEarly = false;
-  let lastProcessedRow = startRow;
+  let lastProcessedRow = 2;
   
   const errorsSheet = getOrCreateSheet(CONFIG.ERRORS_SHEET_NAME, [
     'Timestamp', 'Row', 'Card ID', 'Verse Ref', 'Translation', 'Error Message'
   ]);
   
-  for (let r = startRow; r <= data.length; r++) {
-    // Time limit safety check
+  for (let r = 2; r <= data.length; r++) {
+    // Time limit safety check (pauses safely at 4.5 minutes before Google's 6-min limit)
     if (Date.now() - startTime > CONFIG.MAX_EXECUTION_TIME_MS) {
       stoppedEarly = true;
       lastProcessedRow = r;
@@ -143,21 +139,19 @@ function fillVerseText() {
     const rawTranslation = headerMap.translation !== undefined ? String(rowValues[headerMap.translation] || '').trim() : '';
     const translation = rawTranslation.toLowerCase() || CONFIG.DEFAULT_TRANSLATION;
     
-    // Skip if verse_text is already present
+    // If verse_text is already present, skip instantly
     if (existingText.length > 0) {
       skippedCount++;
-      lastProcessedRow = r;
       continue;
     }
     
     // If verse_ref is empty, we cannot fetch
     if (!verseRef) {
       skippedCount++;
-      lastProcessedRow = r;
       continue;
     }
     
-    // Fetch verse from API
+    // Fetch verse from API (with automatic retry and backoff on 429)
     const fetchResult = fetchVerseFromApi(verseRef, translation);
     
     if (fetchResult.success) {
@@ -179,70 +173,81 @@ function fillVerseText() {
     Utilities.sleep(CONFIG.API_DELAY_MS);
   }
   
-  // Update progress tracker
-  if (stoppedEarly && lastProcessedRow < data.length) {
-    scriptProps.setProperty(CONFIG.PROP_LAST_ROW, String(lastProcessedRow));
-    const msg = `Paused safely near execution limit at row ${lastProcessedRow}/${data.length}.\nFilled: ${filledCount}, Errors: ${errorCount}.\nRun "Fill Verse Text" again to resume.`;
+  invalidateCache();
+  
+  if (stoppedEarly) {
+    const msg = `Paused safely near execution limit at row ${lastProcessedRow}/${data.length}.\nNewly Filled: ${filledCount}, Errors: ${errorCount}.\nRun "Fill Verse Text" again to continue filling remaining empty rows.`;
     SpreadsheetApp.getActiveSpreadsheet().toast(msg, 'HolyThing: In Progress', 10);
     SpreadsheetApp.getUi().alert(msg);
   } else {
-    scriptProps.deleteProperty(CONFIG.PROP_LAST_ROW);
-    invalidateCache();
-    const msg = `Completed!\nFilled: ${filledCount}\nSkipped: ${skippedCount}\nErrors: ${errorCount} (see "${CONFIG.ERRORS_SHEET_NAME}" sheet)`;
+    const msg = `Completed!\nNewly Filled: ${filledCount}\nAlready Populated: ${skippedCount}\nErrors: ${errorCount} (see "${CONFIG.ERRORS_SHEET_NAME}" sheet)`;
     SpreadsheetApp.getActiveSpreadsheet().toast(msg, 'HolyThing: Done', 8);
     SpreadsheetApp.getUi().alert(msg);
   }
 }
 
 /**
- * Fetches and cleans scripture text from bible-api.com
+ * Fetches and cleans scripture text from bible-api.com with automatic retry on 429 rate limits.
  */
 function fetchVerseFromApi(reference, translation) {
-  // bible-api.com format: https://bible-api.com/{reference}?translation={translation}
-  // Handles multi-word book names, verse ranges (e.g., Psalm 23:1-3)
   const cleanRef = reference.trim();
   const url = `https://bible-api.com/${encodeURIComponent(cleanRef)}?translation=${encodeURIComponent(translation)}`;
   
-  try {
-    const response = UrlFetchApp.fetch(url, {
-      muteHttpExceptions: true,
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'HolyThing-Android-Content-Backend/1.0'
-      }
-    });
-    
-    const statusCode = response.getResponseCode();
-    const responseBody = response.getContentText();
-    
-    if (statusCode === 200) {
-      const json = JSON.parse(responseBody);
-      if (json.text) {
-        return { success: true, text: cleanScriptureText(json.text) };
-      } else {
-        return { success: false, error: 'Empty text returned in API response' };
-      }
-    }
-    
-    // If requested translation failed and it wasn't WEB, fallback to WEB
-    if (translation !== CONFIG.DEFAULT_TRANSLATION) {
-      const fallbackUrl = `https://bible-api.com/${encodeURIComponent(cleanRef)}?translation=${CONFIG.DEFAULT_TRANSLATION}`;
-      const fallbackResp = UrlFetchApp.fetch(fallbackUrl, { muteHttpExceptions: true });
-      if (fallbackResp.getResponseCode() === 200) {
-        const json = JSON.parse(fallbackResp.getContentText());
+  let lastError = '';
+  const maxAttempts = 3;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = UrlFetchApp.fetch(url, {
+        muteHttpExceptions: true,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'HolyThing-Android-Content-Backend/1.0'
+        }
+      });
+      
+      const statusCode = response.getResponseCode();
+      const responseBody = response.getContentText();
+      
+      if (statusCode === 200) {
+        const json = JSON.parse(responseBody);
         if (json.text) {
           return { success: true, text: cleanScriptureText(json.text) };
+        } else {
+          return { success: false, error: 'Empty text returned in API response' };
         }
       }
+      
+      // If rate limited (HTTP 429), back off and retry
+      if (statusCode === 429) {
+        lastError = 'HTTP 429: Rate limited';
+        Utilities.sleep(1500 * attempt); // wait 1.5s, 3s, 4.5s
+        continue;
+      }
+      
+      // If requested translation failed and it wasn't WEB, fallback to WEB
+      if (translation !== CONFIG.DEFAULT_TRANSLATION) {
+        const fallbackUrl = `https://bible-api.com/${encodeURIComponent(cleanRef)}?translation=${CONFIG.DEFAULT_TRANSLATION}`;
+        const fallbackResp = UrlFetchApp.fetch(fallbackUrl, { muteHttpExceptions: true });
+        if (fallbackResp.getResponseCode() === 200) {
+          const json = JSON.parse(fallbackResp.getContentText());
+          if (json.text) {
+            return { success: true, text: cleanScriptureText(json.text) };
+          }
+        }
+      }
+      
+      return {
+        success: false,
+        error: `HTTP ${statusCode}: ${responseBody.substring(0, 150)}`
+      };
+    } catch (e) {
+      lastError = `Exception: ${e.message}`;
+      Utilities.sleep(1000 * attempt);
     }
-    
-    return {
-      success: false,
-      error: `HTTP ${statusCode}: ${responseBody.substring(0, 150)}`
-    };
-  } catch (e) {
-    return { success: false, error: `Exception: ${e.message}` };
   }
+  
+  return { success: false, error: lastError };
 }
 
 /**
