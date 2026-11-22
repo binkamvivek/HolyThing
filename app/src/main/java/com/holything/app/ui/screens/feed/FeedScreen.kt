@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -138,9 +139,16 @@ fun FeedScreen(
                         }
                     }
 
+                    val flingBehavior = PagerDefaults.flingBehavior(
+                        state = pagerState,
+                        snapPositionalThreshold = 0.15f // Quick, effortless flick to advance cards
+                    )
+
                     VerticalPager(
                         state = pagerState,
                         beyondViewportPageCount = 2, // Smooth preloading for mid-range devices
+                        flingBehavior = flingBehavior,
+                        key = { pageIndex -> uiState.items.getOrNull(pageIndex)?.card?.id ?: pageIndex },
                         modifier = Modifier.fillMaxSize()
                     ) { pageIndex ->
                         val item = uiState.items.getOrNull(pageIndex)

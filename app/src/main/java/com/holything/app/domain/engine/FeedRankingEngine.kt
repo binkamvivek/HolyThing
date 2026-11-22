@@ -83,7 +83,7 @@ object FeedRankingEngine {
         val scoredCards = pool.map { card ->
             val score = scoreCard(card, tasteProfile, onboardingPrefs)
             card to score
-        }.shuffled()
+        }
 
         val closeMatchList = scoredCards
             .filter { (card, _) ->
@@ -99,11 +99,13 @@ object FeedRankingEngine {
             .filter { (card, _) ->
                 card.topics.any { it.lowercase() in adjacentTopics } && card !in closeMatchList
             }
+            .sortedByDescending { it.second }
             .map { it.first }
             .toMutableList()
 
         val wildcardList = scoredCards
             .filter { (card, _) -> card !in closeMatchList && card !in adjacentList }
+            .sortedByDescending { it.second }
             .map { it.first }
             .toMutableList()
 

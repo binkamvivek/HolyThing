@@ -98,12 +98,13 @@ class ContentRepository @Inject constructor(
         val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
         return combine(
             cards,
-            amenedCardIds,
-            savedCardIds,
-            dataStore.onboardingPreferences,
-            dataStore.tasteProfileJson
-        ) { rawCards, amenedList, savedList, onboardingPrefs, tasteJson ->
+            dataStore.onboardingPreferences
+        ) { rawCards, onboardingPrefs ->
+            if (rawCards.isEmpty()) return@combine emptyList<FeedCardItem>()
             val seenCardIds = interactionDao.getRecentlySeenCardIds(thirtyDaysAgo).toSet()
+            val amenedList = interactionDao.getAmenedCardIds().first()
+            val savedList = savedCardDao.getAllSavedCardIds().first()
+            val tasteJson = dataStore.tasteProfileJson.first()
             val tasteProfile = tasteJson?.let {
                 try { json.decodeFromString<TasteProfile>(it) } catch (e: Exception) { null }
             } ?: TasteProfileEngine.createFromOnboarding(onboardingPrefs)

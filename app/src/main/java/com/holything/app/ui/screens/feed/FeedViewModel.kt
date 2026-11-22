@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -50,6 +52,8 @@ class FeedViewModel @Inject constructor(
     private var currentPageIndex = 0
     private var pageStartTime = System.currentTimeMillis()
 
+    private val _feedItemsFlow = MutableStateFlow<List<FeedCardItem>>(emptyList())
+
     private data class SyncStatus(
         val loading: Boolean,
         val syncing: Boolean,
@@ -83,7 +87,7 @@ class FeedViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<FeedUiState> = combine(
-        repository.getFeedCards(),
+        _feedItemsFlow,
         repository.cardsCount,
         syncStatusFlow,
         userPrefsFlow
@@ -109,6 +113,13 @@ class FeedViewModel @Inject constructor(
     )
 
     init {
+        viewModelScope.launch {
+            repository.getFeedCards().collect { newItems ->
+                if (_feedItemsFlow.value.isEmpty() || newItems.size != _feedItemsFlow.value.size) {
+                    _feedItemsFlow.value = newItems
+                }
+            }
+        }
         syncContent()
     }
 
@@ -171,6 +182,9 @@ class FeedViewModel @Inject constructor(
     fun onAmenToggle(cardId: String) {
         viewModelScope.launch {
             val added = repository.toggleAmen(cardId)
+            _feedItemsFlow.update { list ->
+                list.map { if (it.card.id == cardId) it.copy(isAmened = added) else it }
+            }
             _userFeedbackEvent.emit(if (added) "Amen" else "Amen removed")
         }
     }
@@ -178,6 +192,9 @@ class FeedViewModel @Inject constructor(
     fun onSaveToggle(cardId: String) {
         viewModelScope.launch {
             val added = repository.toggleSave(cardId)
+            _feedItemsFlow.update { list ->
+                list.map { if (it.card.id == cardId) it.copy(isSaved = added) else it }
+            }
             _userFeedbackEvent.emit(if (added) "Saved to your library" else "Removed from Saved")
         }
     }
@@ -226,6 +243,7 @@ class FeedViewModel @Inject constructor(
             repository.updateMood(newMood)
             dataStore.resetSwipeCount()
             _userFeedbackEvent.emit("Tuning cards for feeling $newMood")
+            _feedItemsFlow.value = repository.getFeedCards().first()
         }
     }
 

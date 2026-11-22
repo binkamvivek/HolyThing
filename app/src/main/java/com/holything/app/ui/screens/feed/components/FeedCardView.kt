@@ -113,12 +113,11 @@ fun FeedCardView(
             .background(backgroundBrush)
             .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
-        // Main Card Content Column (Scrollable if user has extra large text)
+        // Main Card Content Column
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(end = 56.dp, bottom = 48.dp) // Room for right action buttons and bottom label
-                .verticalScroll(rememberScrollState()),
+                .padding(end = 56.dp, bottom = 48.dp), // Room for right action buttons and bottom label
             verticalArrangement = Arrangement.Center
         ) {
             // 1. Subtle Format & Series Header Badge

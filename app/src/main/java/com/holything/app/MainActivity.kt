@@ -7,6 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.ui.navigation.HolyThingNavHost
@@ -28,7 +33,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val textScale by dataStore.textScale.collectAsState(initial = 1.0f)
             val darkModeConfig by dataStore.darkModeConfig.collectAsState(initial = "SYSTEM")
-            val hasSeenWelcome by dataStore.hasSeenWelcome.collectAsState(initial = false)
+            val hasSeenWelcome by dataStore.hasSeenWelcome.collectAsState(initial = null)
 
             val isDark = when (darkModeConfig) {
                 "DARK" -> true
@@ -40,14 +45,23 @@ class MainActivity : ComponentActivity() {
                 darkTheme = isDark,
                 textScaleFactor = textScale
             ) {
-                HolyThingNavHost(
-                    hasSeenWelcome = hasSeenWelcome,
-                    onCompleteWelcome = {
-                        lifecycleScope.launch {
-                            dataStore.setHasSeenWelcome(true)
+                if (hasSeenWelcome == null) {
+                    // Prevent flash: show calm background while reading state from disk
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background)
+                    )
+                } else {
+                    HolyThingNavHost(
+                        hasSeenWelcome = hasSeenWelcome == true,
+                        onCompleteWelcome = {
+                            lifecycleScope.launch {
+                                dataStore.setHasSeenWelcome(true)
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }
