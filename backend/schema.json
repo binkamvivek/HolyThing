@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HolyThingSyncResponse",
+  "description": "Response schema returned by the HolyThing Google Apps Script Web App endpoint (doGet).",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/CardsPayload"
+    },
+    {
+      "$ref": "#/definitions/UpToDatePayload"
+    }
+  ],
+  "definitions": {
+    "UpToDatePayload": {
+      "type": "object",
+      "required": ["upToDate", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "upToDate": {
+          "type": "boolean",
+          "const": true,
+          "description": "True when the client-supplied ?since=<version> matches the current backend data version."
+        },
+        "version": {
+          "type": "string",
+          "description": "The current version hash confirming client is up to date."
+        }
+      }
+    },
+    "CardsPayload": {
+      "type": "object",
+      "required": ["version", "updatedAt", "count", "cards"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Deterministic SHA-256 hash fingerprint of active cards."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of when this feed was generated."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total count of active cards included in the payload."
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Card"
+          }
+        }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "required": [
+        "id",
+        "format",
+        "hook",
+        "verse_ref",
+        "verse_text",
+        "translation",
+        "insight",
+        "topics",
+        "moods",
+        "tone",
+        "book",
+        "length",
+        "series_id",
+        "series_order",
+        "reflection_prompt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the card (e.g. card_001)."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["verse", "story", "testimony", "didyouknow", "question"],
+          "description": "The card layout and visual structure archetype."
+        },
+        "hook": {
+          "type": "string",
+          "description": "Attention hook line displayed first in large typography."
+        },
+        "verse_ref": {
+          "type": "string",
+          "description": "Scripture reference string (e.g. Psalm 23:1-3, John 3:16)."
+        },
+        "verse_text": {
+          "type": "string",
+          "description": "Full verse text cleaned of linebreaks and stray characters."
+        },
+        "translation": {
+          "type": "string",
+          "description": "Bible translation identifier (e.g. WEB, KJV, BSB)."
+        },
+        "insight": {
+          "type": "string",
+          "description": "Short plain-language insight or historical/spiritual context."
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of normalized lower-case topical keywords."
+        },
+        "moods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Emotional and mental state descriptors (e.g. anxious, tired, hopeful)."
+        },
+        "tone": {
+          "type": "string",
+          "description": "Tone classification (e.g. comforting, inspiring, historical, reflective)."
+        },
+        "book": {
+          "type": "string",
+          "description": "Book of the Bible (e.g. Psalms, Romans, Matthew)."
+        },
+        "length": {
+          "type": "string",
+          "enum": ["short", "medium", "long"],
+          "description": "Reading length classification to help pace the user's feed."
+        },
+        "series_id": {
+          "type": ["string", "null"],
+          "description": "Identifies multi-part narrative series (required for 'story' cards)."
+        },
+        "series_order": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "1-based order within the series (required for 'story' cards)."
+        },
+        "reflection_prompt": {
+          "type": "string",
+          "description": "Guilt-free prompt inviting the reader to pause, breathe, or pray."
+        }
+      }
+    }
+  }
+}
+
