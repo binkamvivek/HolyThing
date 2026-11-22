@@ -115,8 +115,16 @@ class FeedViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.getFeedCards().collect { newItems ->
-                if (_feedItemsFlow.value.isEmpty() || newItems.size != _feedItemsFlow.value.size) {
+                if (_feedItemsFlow.value.isEmpty()) {
                     _feedItemsFlow.value = newItems
+                } else {
+                    // Preserve the active session feed stability!
+                    // Cards that user is reading or has scrolled past must never shift or disappear.
+                    val existingIds = _feedItemsFlow.value.map { it.card.id }.toSet()
+                    val toAppend = newItems.filter { it.card.id !in existingIds }
+                    if (toAppend.isNotEmpty()) {
+                        _feedItemsFlow.value = _feedItemsFlow.value + toAppend
+                    }
                 }
             }
         }

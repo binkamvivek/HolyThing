@@ -1,9 +1,8 @@
 package com.holything.app.ui.screens.feed.components
 
 import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -18,9 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.MenuBook
@@ -38,9 +35,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
@@ -86,22 +85,39 @@ fun FeedCardView(
         }
     }
 
-    var showVerse by remember { mutableStateOf(isReduceMotion) }
-    var showInsight by remember { mutableStateOf(isReduceMotion) }
+    // Track revealed state per card so scrolling backwards doesn't re-delay or jump
+    var hasBeenRevealed by rememberSaveable(card.id) { mutableStateOf(isReduceMotion) }
+    var showVerse by rememberSaveable(card.id) { mutableStateOf(isReduceMotion || hasBeenRevealed) }
+    var showInsight by rememberSaveable(card.id) { mutableStateOf(isReduceMotion || hasBeenRevealed) }
 
     LaunchedEffect(isCurrentPage) {
-        if (isCurrentPage) {
+        if (isCurrentPage && !hasBeenRevealed) {
             if (isReduceMotion) {
                 showVerse = true
                 showInsight = true
+                hasBeenRevealed = true
             } else {
-                delay(1000)
+                delay(700)
                 showVerse = true
-                delay(800)
+                delay(500)
                 showInsight = true
+                hasBeenRevealed = true
             }
         }
     }
+
+    // Alpha animations preserve exact layout measurement so content never jumps
+    val verseAlpha by animateFloatAsState(
+        targetValue = if (showVerse || hasBeenRevealed) 1f else 0f,
+        animationSpec = tween(durationMillis = if (isReduceMotion) 0 else 500),
+        label = "verseAlpha"
+    )
+
+    val insightAlpha by animateFloatAsState(
+        targetValue = if (showInsight || hasBeenRevealed) 1f else 0f,
+        animationSpec = tween(durationMillis = if (isReduceMotion) 0 else 500),
+        label = "insightAlpha"
+    )
 
     val backgroundBrush = remember(card.tone, isDark) {
         CardBackgroundGradients.getGradient(card.tone, isDark)
@@ -113,7 +129,7 @@ fun FeedCardView(
             .background(backgroundBrush)
             .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
-        // Main Card Content Column
+        // Main Card Content Column - stable layout with no height collapses
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -139,56 +155,49 @@ fun FeedCardView(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 3. Verse Reference & Scripture Text (Fades in after ~1s)
-            AnimatedVisibility(
-                visible = showVerse,
-                enter = fadeIn(animationSpec = tween(durationMillis = if (isReduceMotion) 0 else 700))
+            // 3. Verse Reference & Scripture Text (Fades in without layout jump)
+            Column(
+                modifier = Modifier
+                    .graphicsLayer { alpha = verseAlpha }
+                    .semantics { traversalIndex = 2f }
             ) {
-                Column(
-                    modifier = Modifier.semantics { traversalIndex = 2f }
-                ) {
-                    Text(
-                        text = "${card.verseRef}  •  ${card.translation}",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        ),
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+                Text(
+                    text = "${card.verseRef}  •  ${card.translation}",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    ),
+                    color = MaterialTheme.colorScheme.secondary
+                )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    Text(
-                        text = "“${card.verseText}”",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
+                Text(
+                    text = "“${card.verseText}”",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 4. Plain-Language Insight (Fades in next)
-            AnimatedVisibility(
-                visible = showInsight,
-                enter = fadeIn(animationSpec = tween(durationMillis = if (isReduceMotion) 0 else 700))
-            ) {
-                if (card.insight.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                        tonalElevation = 1.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics { traversalIndex = 3f }
-                    ) {
-                        Text(
-                            text = card.insight,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(14.dp)
-                        )
-                    }
+            // 4. Plain-Language Insight (Fades in without layout jump)
+            if (card.insight.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                    tonalElevation = 1.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { alpha = insightAlpha }
+                        .semantics { traversalIndex = 3f }
+                ) {
+                    Text(
+                        text = card.insight,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(14.dp)
+                    )
                 }
             }
         }

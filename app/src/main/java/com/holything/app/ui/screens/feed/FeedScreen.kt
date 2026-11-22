@@ -150,7 +150,7 @@ fun FeedScreen(
 
                     VerticalPager(
                         state = pagerState,
-                        beyondViewportPageCount = 2, // Smooth preloading for mid-range devices
+                        beyondViewportPageCount = 3, // Automatically prepare next 3 posts in advance
                         flingBehavior = flingBehavior,
                         key = { pageIndex -> uiState.items.getOrNull(pageIndex)?.card?.id ?: pageIndex },
                         modifier = Modifier.fillMaxSize()

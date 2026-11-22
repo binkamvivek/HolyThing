@@ -59,6 +59,7 @@ class ContentRepository @Inject constructor(
     val amenedCardIds: Flow<List<String>> = interactionDao.getAmenedCardIds()
     val savedCardIds: Flow<List<String>> = savedCardDao.getAllSavedCardIds()
 
+    private val sessionStartTime: Long = System.currentTimeMillis()
     private var lastInteractedCard: Card? = null
 
     val distinctMoods: Flow<List<String>> = cards.map { cardList ->
@@ -101,7 +102,8 @@ class ContentRepository @Inject constructor(
             dataStore.onboardingPreferences
         ) { rawCards, onboardingPrefs ->
             if (rawCards.isEmpty()) return@combine emptyList<FeedCardItem>()
-            val seenCardIds = interactionDao.getRecentlySeenCardIds(thirtyDaysAgo).toSet()
+            // Exclude cards seen prior to this session, but keep cards seen during this session
+            val seenCardIds = interactionDao.getRecentlySeenCardIdsBefore(thirtyDaysAgo, sessionStartTime).toSet()
             val amenedList = interactionDao.getAmenedCardIds().first()
             val savedList = savedCardDao.getAllSavedCardIds().first()
             val tasteJson = dataStore.tasteProfileJson.first()

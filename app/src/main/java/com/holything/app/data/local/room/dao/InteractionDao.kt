@@ -18,6 +18,9 @@ interface InteractionDao {
     @Query("SELECT DISTINCT cardId FROM interactions WHERE timestamp >= :sinceTimestamp AND type IN ('dwell', 'fast_skip')")
     suspend fun getRecentlySeenCardIds(sinceTimestamp: Long): List<String>
 
+    @Query("SELECT DISTINCT cardId FROM interactions WHERE timestamp >= :sinceTimestamp AND timestamp < :untilTimestamp AND type IN ('dwell', 'fast_skip')")
+    suspend fun getRecentlySeenCardIdsBefore(sinceTimestamp: Long, untilTimestamp: Long): List<String>
+
     @Query("SELECT DISTINCT cardId FROM interactions WHERE type = 'amen'")
     fun getAmenedCardIds(): Flow<List<String>>
 
