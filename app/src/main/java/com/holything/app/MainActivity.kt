@@ -33,7 +33,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             val textScale by dataStore.textScale.collectAsState(initial = 1.0f)
             val darkModeConfig by dataStore.darkModeConfig.collectAsState(initial = "SYSTEM")
-            val hasSeenWelcome by dataStore.hasSeenWelcome.collectAsState(initial = null)
 
             val isDark = when (darkModeConfig) {
                 "DARK" -> true
@@ -45,23 +44,7 @@ class MainActivity : ComponentActivity() {
                 darkTheme = isDark,
                 textScaleFactor = textScale
             ) {
-                if (hasSeenWelcome == null) {
-                    // Prevent flash: show calm background while reading state from disk
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background)
-                    )
-                } else {
-                    HolyThingNavHost(
-                        hasSeenWelcome = hasSeenWelcome == true,
-                        onCompleteWelcome = {
-                            lifecycleScope.launch {
-                                dataStore.setHasSeenWelcome(true)
-                            }
-                        }
-                    )
-                }
+                HolyThingNavHost()
             }
         }
     }

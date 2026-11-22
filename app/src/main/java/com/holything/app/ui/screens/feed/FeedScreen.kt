@@ -15,7 +15,10 @@ import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,7 +52,8 @@ import com.holything.app.ui.screens.feed.components.WhyThisCardDialog
 
 @Composable
 fun FeedScreen(
-    viewModel: FeedViewModel
+    viewModel: FeedViewModel,
+    onBack: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -226,6 +230,27 @@ fun FeedScreen(
                         .align(Alignment.TopCenter)
                         .padding(top = if (uiState.isOffline) 40.dp else 12.dp)
                 )
+            }
+
+            // Top-left Back button to return to Home screen
+            if (onBack != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                    modifier = Modifier
+                        .padding(start = 16.dp, top = 16.dp)
+                        .size(42.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to Home",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }

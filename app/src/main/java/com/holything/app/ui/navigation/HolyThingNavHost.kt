@@ -18,18 +18,15 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.holything.app.ui.screens.feed.FeedScreen
 import com.holything.app.ui.screens.feed.FeedViewModel
+import com.holything.app.ui.screens.home.HomeScreen
 import com.holything.app.ui.screens.profile.ProfileScreen
 import com.holything.app.ui.screens.profile.ProfileViewModel
 import com.holything.app.ui.screens.saved.SavedScreen
 import com.holything.app.ui.screens.saved.SavedViewModel
-import com.holything.app.ui.screens.welcome.OnboardingScreen
-import com.holything.app.ui.screens.welcome.OnboardingViewModel
 
 @Composable
 fun HolyThingNavHost(
-    navController: NavHostController = rememberNavController(),
-    hasSeenWelcome: Boolean,
-    onCompleteWelcome: () -> Unit
+    navController: NavHostController = rememberNavController()
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -62,24 +59,24 @@ fun HolyThingNavHost(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = if (hasSeenWelcome) Screen.Feed.route else Screen.Welcome.route,
+            startDestination = Screen.Home.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Welcome.route) {
-                val onboardingViewModel: OnboardingViewModel = hiltViewModel()
-                OnboardingScreen(
-                    viewModel = onboardingViewModel,
-                    onFinish = {
-                        onCompleteWelcome()
-                        navController.navigate(Screen.Feed.route) {
-                            popUpTo(Screen.Welcome.route) { inclusive = true }
-                        }
+            composable(Screen.Home.route) {
+                val feedViewModel: FeedViewModel = hiltViewModel()
+                HomeScreen(
+                    viewModel = feedViewModel,
+                    onOpenFeed = {
+                        navController.navigate(Screen.FeedPager.route)
                     }
                 )
             }
-            composable(Screen.Feed.route) {
+            composable(Screen.FeedPager.route) {
                 val feedViewModel: FeedViewModel = hiltViewModel()
-                FeedScreen(viewModel = feedViewModel)
+                FeedScreen(
+                    viewModel = feedViewModel,
+                    onBack = { navController.popBackStack() }
+                )
             }
             composable(Screen.Saved.route) {
                 val savedViewModel: SavedViewModel = hiltViewModel()
