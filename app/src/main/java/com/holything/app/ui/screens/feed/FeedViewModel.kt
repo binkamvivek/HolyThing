@@ -51,6 +51,9 @@ class FeedViewModel @Inject constructor(
     private val _userFeedbackEvent = MutableSharedFlow<String>()
     val userFeedbackEvent: SharedFlow<String> = _userFeedbackEvent.asSharedFlow()
 
+    private val _targetScrollCardId = MutableStateFlow<String?>(null)
+    val targetScrollCardId: StateFlow<String?> = _targetScrollCardId
+
     private var currentPageIndex = 0
     private var pageStartTime = System.currentTimeMillis()
 
@@ -256,7 +259,10 @@ class FeedViewModel @Inject constructor(
             repository.updateMood(newMood)
             dataStore.resetSwipeCount()
             _userFeedbackEvent.emit("Tuning cards for feeling $newMood")
-            _feedItemsFlow.value = repository.getFeedCards().first()
+            val freshFeed = repository.getFeedCards().first()
+            _feedItemsFlow.value = freshFeed
+            currentPageIndex = 0
+            _targetScrollCardId.value = freshFeed.firstOrNull()?.card?.id
         }
     }
 
@@ -264,6 +270,14 @@ class FeedViewModel @Inject constructor(
         viewModelScope.launch {
             dataStore.resetSwipeCount()
         }
+    }
+
+    fun openCardInFeed(cardId: String) {
+        _targetScrollCardId.value = cardId
+    }
+
+    fun onScrolledToTargetCard() {
+        _targetScrollCardId.value = null
     }
 
     /**
@@ -292,6 +306,7 @@ class FeedViewModel @Inject constructor(
                 val remaining = freshFeed.filter { it.card.id != newTop.card.id }
                 _feedItemsFlow.value = listOf(newTop) + remaining
                 currentPageIndex = 0
+                _targetScrollCardId.value = newTop.card.id
             }
             kotlinx.coroutines.delay(400) // Natural settle time for pull-to-refresh spinner
             isRefreshingFlow.value = false

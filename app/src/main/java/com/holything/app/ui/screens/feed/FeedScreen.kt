@@ -136,6 +136,20 @@ fun FeedScreen(
                         pageCount = { uiState.items.size }
                     )
 
+                    val targetCardId by viewModel.targetScrollCardId.collectAsState()
+
+                    // When navigating from Home screen or reloading, scroll directly to the selected card
+                    LaunchedEffect(targetCardId, uiState.items) {
+                        val targetId = targetCardId
+                        if (targetId != null && uiState.items.isNotEmpty()) {
+                            val targetIndex = uiState.items.indexOfFirst { it.card.id == targetId }
+                            if (targetIndex >= 0) {
+                                pagerState.scrollToPage(targetIndex)
+                                viewModel.onScrolledToTargetCard()
+                            }
+                        }
+                    }
+
                     // Track page changes for dwell time
                     LaunchedEffect(pagerState) {
                         snapshotFlow { pagerState.currentPage }.collect { pageIndex ->

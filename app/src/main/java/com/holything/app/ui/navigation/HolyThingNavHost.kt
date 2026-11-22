@@ -33,6 +33,11 @@ fun HolyThingNavHost(
 
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
 
+    // Shared ViewModels across navigation graph destinations
+    val feedViewModel: FeedViewModel = hiltViewModel()
+    val savedViewModel: SavedViewModel = hiltViewModel()
+    val profileViewModel: ProfileViewModel = hiltViewModel()
+
     Scaffold(
         bottomBar = {
             if (showBottomBar) {
@@ -63,7 +68,6 @@ fun HolyThingNavHost(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Home.route) {
-                val feedViewModel: FeedViewModel = hiltViewModel()
                 HomeScreen(
                     viewModel = feedViewModel,
                     onOpenFeed = {
@@ -72,18 +76,15 @@ fun HolyThingNavHost(
                 )
             }
             composable(Screen.FeedPager.route) {
-                val feedViewModel: FeedViewModel = hiltViewModel()
                 FeedScreen(
                     viewModel = feedViewModel,
                     onBack = { navController.popBackStack() }
                 )
             }
             composable(Screen.Saved.route) {
-                val savedViewModel: SavedViewModel = hiltViewModel()
                 SavedScreen(viewModel = savedViewModel)
             }
             composable(Screen.Profile.route) {
-                val profileViewModel: ProfileViewModel = hiltViewModel()
                 ProfileScreen(viewModel = profileViewModel)
             }
         }

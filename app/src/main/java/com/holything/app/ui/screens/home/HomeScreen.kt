@@ -183,7 +183,10 @@ fun HomeScreen(
                             .fillMaxWidth()
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(24.dp))
-                            .clickable { onOpenFeed() },
+                            .clickable {
+                                viewModel.openCardInFeed(card.id)
+                                onOpenFeed()
+                            },
                         shape = RoundedCornerShape(24.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
@@ -267,7 +270,12 @@ fun HomeScreen(
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            viewModel.openCardInFeed(card.id)
+                                            onOpenFeed()
+                                        }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
