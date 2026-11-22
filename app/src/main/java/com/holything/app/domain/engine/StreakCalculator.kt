@@ -20,6 +20,14 @@ object StreakCalculator {
         val todayCount = daysMap[todayStr]?.cardsReadCount ?: 0
         val totalCount = readingDays.sumOf { it.cardsReadCount }
 
+        // Earliest date the user actively met the daily reading target
+        val earliestActiveDate = readingDays
+            .filter { it.cardsReadCount >= TARGET_CARDS_PER_DAY }
+            .minByOrNull { it.date }
+            ?.let {
+                try { LocalDate.parse(it.date) } catch (e: Exception) { null }
+            }
+
         // Streak evaluation:
         // A day counts at 5+ cards.
         // If today >= 5, streak starts from today.
@@ -35,7 +43,7 @@ object StreakCalculator {
         var graceDaysUsedInWindow = 0
         var daysEvaluated = 0
 
-        while (true) {
+        while (earliestActiveDate != null && !checkDate.isBefore(earliestActiveDate)) {
             val dateStr = checkDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
             val dayRecord = daysMap[dateStr]
             val count = dayRecord?.cardsReadCount ?: 0
@@ -52,6 +60,7 @@ object StreakCalculator {
             } else if (graceDaysUsedInWindow == 0) {
                 // Forgive 1 missed day per 7-day window as a grace day
                 graceDaysUsedInWindow++
+                streak++
                 daysEvaluated++
                 checkDate = checkDate.minusDays(1)
             } else {

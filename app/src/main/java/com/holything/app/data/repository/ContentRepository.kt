@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import java.io.InputStreamReader
 import com.holything.app.data.local.room.dao.JournalNoteDao
 import com.holything.app.data.local.room.dao.ReadingDayDao
 import com.holything.app.data.local.room.entity.JournalNoteEntity
