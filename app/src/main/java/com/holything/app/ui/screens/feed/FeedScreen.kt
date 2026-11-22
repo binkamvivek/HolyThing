@@ -36,9 +36,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.holything.app.domain.model.Card
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.holything.app.ui.screens.feed.components.PauseCardView
+import com.holything.app.ui.screens.feed.components.ShareVerseSheet
 import com.holything.app.ui.screens.feed.components.FeedCardView
+import com.holything.app.ui.screens.feed.components.MoodRecheckDialog
 import com.holything.app.ui.screens.feed.components.ReflectBottomSheet
+import com.holything.app.ui.screens.feed.components.SupportBanner
 import com.holything.app.ui.screens.feed.components.WhyThisCardDialog
 
 @Composable
@@ -49,7 +54,9 @@ fun FeedScreen(
     val context = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
-    var activeReflectCard by remember { mutableStateOf<Card?>(null) }
+    val scope = rememberCoroutineScope()
+    var activeReflectCard by remember { mutableStateOf<com.holything.app.domain.model.Card?>(null) }
+    var activeShareCard by remember { mutableStateOf<com.holything.app.domain.model.Card?>(null) }
     var activeWhyReason by remember { mutableStateOf<String?>(null) }
 
     // Listen to user feedback events (e.g. "Saved to library", "More like this")
@@ -138,30 +145,37 @@ fun FeedScreen(
                     ) { pageIndex ->
                         val item = uiState.items.getOrNull(pageIndex)
                         if (item != null) {
-                            FeedCardView(
-                                item = item,
-                                isCurrentPage = pagerState.currentPage == pageIndex,
-                                onAmenToggle = { viewModel.onAmenToggle(item.card.id) },
-                                onSaveToggle = { viewModel.onSaveToggle(item.card.id) },
-                                onShare = {
-                                    viewModel.onShare(item.card)
-                                    val shareText = "${item.card.hook}\n\n“${item.card.verseText}”\n— ${item.card.verseRef} (${item.card.translation})\n\nRead Scripture on HolyThing"
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(Intent.EXTRA_TEXT, shareText)
-                                        type = "text/plain"
+                            if (item.isPauseCard) {
+                                PauseCardView(
+                                    milestoneCount = item.cardsReadMilestone,
+                                    onReflect = { activeReflectCard = item.card },
+                                    onKeepGoing = {
+                                        scope.launch {
+                                            if (pageIndex + 1 < uiState.items.size) {
+                                                pagerState.animateScrollToPage(pageIndex + 1)
+                                            }
+                                        }
                                     }
-                                    val chooser = Intent.createChooser(sendIntent, "Share Scripture")
-                                    context.startActivity(chooser)
-                                },
-                                onMoreLikeThis = { viewModel.onMoreLikeThis(item.card.id) },
-                                onLessLikeThis = { viewModel.onLessLikeThis(item.card.id) },
-                                onReflect = {
-                                    viewModel.onReflect(item.card.id)
-                                    activeReflectCard = item.card
-                                },
-                                onWhyThisCardClick = { activeWhyReason = item.recommendationReason }
-                            )
+                                )
+                            } else {
+                                FeedCardView(
+                                    item = item,
+                                    isCurrentPage = pagerState.currentPage == pageIndex,
+                                    onAmenToggle = { viewModel.onAmenToggle(item.card.id) },
+                                    onSaveToggle = { viewModel.onSaveToggle(item.card.id) },
+                                    onShare = {
+                                        viewModel.onShare(item.card)
+                                        activeShareCard = item.card
+                                    },
+                                    onMoreLikeThis = { viewModel.onMoreLikeThis(item.card.id) },
+                                    onLessLikeThis = { viewModel.onLessLikeThis(item.card.id) },
+                                    onReflect = {
+                                        viewModel.onReflect(item.card.id)
+                                        activeReflectCard = item.card
+                                    },
+                                    onWhyThisCardClick = { activeWhyReason = item.recommendationReason }
+                                )
+                            }
                         }
                     }
                 }
@@ -195,14 +209,46 @@ fun FeedScreen(
                     }
                 }
             }
+
+            // Phase 4: Gentle dismissible support banner for heavy mood
+            if (uiState.showSupportBanner) {
+                SupportBanner(
+                    onDismiss = { viewModel.dismissSupportBanner() },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = if (uiState.isOffline) 40.dp else 12.dp)
+                )
+            }
         }
+    }
+
+    // Phase 4: Mood Recheck Dialog
+    if (uiState.showMoodRecheck) {
+        MoodRecheckDialog(
+            moods = uiState.availableMoods,
+            currentMood = uiState.currentMood,
+            onSelectNewMood = { viewModel.onMoodRechecked(it) },
+            onDismiss = { viewModel.dismissMoodRecheck() }
+        )
     }
 
     // Modal Reflection Sheet
     activeReflectCard?.let { card ->
         ReflectBottomSheet(
             card = card,
+            onPrayed = { noteText ->
+                viewModel.onPrayed(card.id, noteText)
+                activeReflectCard = null
+            },
             onDismiss = { activeReflectCard = null }
+        )
+    }
+
+    // Modal Share Sheet
+    activeShareCard?.let { card ->
+        ShareVerseSheet(
+            card = card,
+            onDismiss = { activeShareCard = null }
         )
     }
 

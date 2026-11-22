@@ -13,7 +13,11 @@ import com.holything.app.data.local.room.entity.InteractionEntity
 import com.holything.app.data.local.room.entity.SavedCardEntity
 import com.holything.app.domain.model.FeedCardItem
 import com.holything.app.domain.model.SyncResult
-import com.holything.app.domain.usecase.FeedPacingEngine
+import com.holything.app.domain.engine.FeedRankingEngine
+import com.holything.app.domain.engine.TasteProfileEngine
+import com.holything.app.domain.model.OnboardingPreferences
+import com.holything.app.domain.model.TasteProfile
+import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.flow.combine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +26,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import java.io.InputStreamReader
+import com.holything.app.data.local.room.dao.JournalNoteDao
+import com.holything.app.data.local.room.dao.ReadingDayDao
+import com.holything.app.data.local.room.entity.JournalNoteEntity
+import com.holything.app.data.local.room.entity.ReadingDayEntity
+import com.holything.app.domain.engine.StreakCalculator
+import com.holything.app.domain.model.StreakInfo
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,6 +44,8 @@ class ContentRepository @Inject constructor(
     private val cardDao: CardDao,
     private val interactionDao: InteractionDao,
     private val savedCardDao: SavedCardDao,
+    private val journalNoteDao: JournalNoteDao,
+    private val readingDayDao: ReadingDayDao,
     private val dataStore: UserPreferencesDataStore,
     private val json: Json
 ) {
@@ -45,22 +58,66 @@ class ContentRepository @Inject constructor(
     val amenedCardIds: Flow<List<String>> = interactionDao.getAmenedCardIds()
     val savedCardIds: Flow<List<String>> = savedCardDao.getAllSavedCardIds()
 
+    private var lastInteractedCard: Card? = null
+
+    val distinctMoods: Flow<List<String>> = cards.map { cardList ->
+        val moods = cardList.flatMap { it.moods }.map { it.trim().lowercase() }.filter { it.isNotBlank() }.distinct().sorted()
+        if (moods.isNotEmpty()) moods else OnboardingPreferences.DEFAULT_MOODS
+    }
+
+    val streakInfo: Flow<StreakInfo> = combine(
+        readingDayDao.getAllReadingDays(),
+        dataStore.tasteProfileJson
+    ) { readingDays, tasteJson ->
+        val tasteProfile = tasteJson?.let {
+            try { json.decodeFromString<TasteProfile>(it) } catch (e: Exception) { null }
+        }
+        val topTopics = tasteProfile?.topicScores?.entries
+            ?.sortedByDescending { it.value }
+            ?.take(3)
+            ?.map { it.key.replaceFirstChar { c -> c.uppercase() } } ?: emptyList()
+        StreakCalculator.calculate(
+            readingDays = readingDays,
+            favoriteTopics = topTopics
+        )
+    }
+
+    fun getSavedCards(): Flow<List<Card>> {
+        return combine(cards, savedCardIds) { allCards, ids ->
+            val idSet = ids.toSet()
+            allCards.filter { it.id in idSet }
+        }
+    }
+
     /**
-     * Emits a paced, shuffled feed with anti-repetition rules and 30-day recency filter applied.
+     * Emits ranked feed with 70/20/10 distribution, style testing, story continuation,
+     * and anti-repetition rules applied.
      */
     fun getFeedCards(): Flow<List<FeedCardItem>> {
         val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
         return combine(
             cards,
             amenedCardIds,
-            savedCardIds
-        ) { rawCards, amenedList, savedList ->
+            savedCardIds,
+            dataStore.onboardingPreferences,
+            dataStore.tasteProfileJson
+        ) { rawCards, amenedList, savedList, onboardingPrefs, tasteJson ->
             val seenCardIds = interactionDao.getRecentlySeenCardIds(thirtyDaysAgo).toSet()
-            FeedPacingEngine.paceFeed(
-                cards = rawCards,
+            val tasteProfile = tasteJson?.let {
+                try { json.decodeFromString<TasteProfile>(it) } catch (e: Exception) { null }
+            } ?: TasteProfileEngine.createFromOnboarding(onboardingPrefs)
+
+            val currentSwipeCount = dataStore.swipeCount.first()
+
+            FeedRankingEngine.rankFeed(
+                allCards = rawCards,
+                tasteProfile = tasteProfile,
+                onboardingPrefs = onboardingPrefs,
                 seenCardIds = seenCardIds,
                 amenedCardIds = amenedList.toSet(),
-                savedCardIds = savedList.toSet()
+                savedCardIds = savedList.toSet(),
+                lastInteractedCard = lastInteractedCard,
+                swipeCount = currentSwipeCount
             )
         }
     }
@@ -74,8 +131,64 @@ class ContentRepository @Inject constructor(
                     dwellMs = dwellMs
                 )
             )
+
+            // Update on-device taste profile
+            val cardEntity = cardDao.getCardById(cardId)
+            if (cardEntity != null) {
+                val card = cardEntity.toDomain()
+                lastInteractedCard = card
+
+                val onboardingPrefs = dataStore.onboardingPreferences.first()
+                val tasteJson = dataStore.tasteProfileJson.first()
+                val currentProfile = tasteJson?.let {
+                    try { json.decodeFromString<TasteProfile>(it) } catch (e: Exception) { null }
+                } ?: TasteProfileEngine.createFromOnboarding(onboardingPrefs)
+
+                val updatedProfile = TasteProfileEngine.updateWithInteraction(
+                    current = currentProfile,
+                    card = card,
+                    interactionType = type,
+                    dwellMs = dwellMs
+                )
+                dataStore.saveTasteProfileJson(json.encodeToString(updatedProfile))
+            }
+
+            if (type in listOf("dwell", "fast_skip")) {
+                dataStore.incrementSwipeCount()
+            }
+
+            if (type == "dwell" || type in listOf("amen", "save", "prayed")) {
+                trackCardRead()
+            }
         }
     }
+
+    private suspend fun trackCardRead() {
+        val todayStr = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val existing = readingDayDao.getReadingDay(todayStr)
+        val newCount = (existing?.cardsReadCount ?: 0) + 1
+        readingDayDao.upsertReadingDay(
+            ReadingDayEntity(
+                date = todayStr,
+                cardsReadCount = newCount,
+                streakCount = 0
+            )
+        )
+    }
+
+    suspend fun saveJournalNote(cardId: String, text: String) = withContext(Dispatchers.IO) {
+        journalNoteDao.upsertNote(
+            JournalNoteEntity(
+                cardId = cardId,
+                noteText = text,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        recordInteraction(cardId = cardId, type = "prayed", dwellMs = 0)
+    }
+
+    fun getJournalNote(cardId: String): Flow<JournalNoteEntity?> =
+        journalNoteDao.getNoteForCard(cardId)
 
     suspend fun toggleAmen(cardId: String): Boolean = withContext(Dispatchers.IO) {
         val alreadyAmened = interactionDao.isCardAmened(cardId)
@@ -189,10 +302,20 @@ class ContentRepository @Inject constructor(
         }
     }
 
+    suspend fun updateMood(newMood: String) = withContext(Dispatchers.IO) {
+        val current = dataStore.onboardingPreferences.first()
+        val updated = current.copy(mood = newMood, isHeavyMood = newMood.lowercase() in OnboardingPreferences.HEAVY_MOODS)
+        dataStore.saveOnboardingPreferences(updated)
+        val newProfile = TasteProfileEngine.createFromOnboarding(updated)
+        dataStore.saveTasteProfileJson(json.encodeToString(newProfile))
+    }
+
     suspend fun clearAllData() {
         cardDao.clearAll()
         interactionDao.clearAll()
         savedCardDao.clearAll()
+        journalNoteDao.clearAll()
+        readingDayDao.clearAll()
         dataStore.clearAll()
     }
 }

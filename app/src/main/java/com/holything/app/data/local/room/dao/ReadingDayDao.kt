@@ -18,6 +18,12 @@ interface ReadingDayDao {
     @Query("SELECT * FROM reading_days ORDER BY date DESC")
     fun getAllReadingDays(): Flow<List<ReadingDayEntity>>
 
+    @Query("SELECT * FROM reading_days WHERE date >= :startDate ORDER BY date ASC")
+    fun getRecentReadingDays(startDate: String): Flow<List<ReadingDayEntity>>
+
+    @Query("SELECT SUM(cardsReadCount) FROM reading_days")
+    fun getTotalCardsRead(): Flow<Int?>
+
     @Query("DELETE FROM reading_days")
     suspend fun clearAll()
 }

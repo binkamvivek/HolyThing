@@ -21,7 +21,9 @@ import com.holything.app.ui.screens.feed.FeedViewModel
 import com.holything.app.ui.screens.profile.ProfileScreen
 import com.holything.app.ui.screens.profile.ProfileViewModel
 import com.holything.app.ui.screens.saved.SavedScreen
-import com.holything.app.ui.screens.welcome.WelcomeScreen
+import com.holything.app.ui.screens.saved.SavedViewModel
+import com.holything.app.ui.screens.welcome.OnboardingScreen
+import com.holything.app.ui.screens.welcome.OnboardingViewModel
 
 @Composable
 fun HolyThingNavHost(
@@ -64,8 +66,10 @@ fun HolyThingNavHost(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Welcome.route) {
-                WelcomeScreen(
-                    onContinue = {
+                val onboardingViewModel: OnboardingViewModel = hiltViewModel()
+                OnboardingScreen(
+                    viewModel = onboardingViewModel,
+                    onFinish = {
                         onCompleteWelcome()
                         navController.navigate(Screen.Feed.route) {
                             popUpTo(Screen.Welcome.route) { inclusive = true }
@@ -78,7 +82,8 @@ fun HolyThingNavHost(
                 FeedScreen(viewModel = feedViewModel)
             }
             composable(Screen.Saved.route) {
-                SavedScreen()
+                val savedViewModel: SavedViewModel = hiltViewModel()
+                SavedScreen(viewModel = savedViewModel)
             }
             composable(Screen.Profile.route) {
                 val profileViewModel: ProfileViewModel = hiltViewModel()

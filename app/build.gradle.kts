@@ -27,13 +27,24 @@ android {
         )
     }
 
+    signingConfigs {
+        create("release") {
+            // Production signing configuration placeholder
+            // storeFile = file("release.keystore")
+            // storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            // keyAlias = System.getenv("KEY_ALIAS") ?: ""
+            // keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = false // Can be enabled with R8; keep false for debug tests, or true with proguard-rules.pro
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

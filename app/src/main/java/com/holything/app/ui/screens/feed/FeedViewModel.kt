@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.holything.app.data.repository.ContentRepository
 import com.holything.app.domain.model.Card
 import com.holything.app.domain.model.FeedCardItem
+import com.holything.app.data.local.datastore.UserPreferencesDataStore
+import com.holything.app.domain.model.OnboardingPreferences
 import com.holything.app.domain.model.SyncResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -24,12 +26,17 @@ data class FeedUiState(
     val isLoading: Boolean = true,
     val isSyncing: Boolean = false,
     val isOffline: Boolean = false,
-    val syncStatusMessage: String = "Ready"
+    val syncStatusMessage: String = "Ready",
+    val showSupportBanner: Boolean = false,
+    val showMoodRecheck: Boolean = false,
+    val currentMood: String = "hopeful",
+    val availableMoods: List<String> = OnboardingPreferences.DEFAULT_MOODS
 )
 
 @HiltViewModel
 class FeedViewModel @Inject constructor(
-    private val repository: ContentRepository
+    private val repository: ContentRepository,
+    private val dataStore: UserPreferencesDataStore
 ) : ViewModel() {
 
     private val isLoadingFlow = MutableStateFlow(true)
@@ -59,18 +66,41 @@ class FeedViewModel @Inject constructor(
         SyncStatus(loading, syncing, offline, msg)
     }
 
+    private data class UserPreferencesState(
+        val onboarding: OnboardingPreferences,
+        val supportShown: Boolean,
+        val swipes: Int,
+        val moods: List<String>
+    )
+
+    private val userPrefsFlow = combine(
+        dataStore.onboardingPreferences,
+        dataStore.hasShownSupportMessage,
+        dataStore.swipeCount,
+        repository.distinctMoods
+    ) { onboarding, supportShown, swipes, moods ->
+        UserPreferencesState(onboarding, supportShown, swipes, moods)
+    }
+
     val uiState: StateFlow<FeedUiState> = combine(
         repository.getFeedCards(),
         repository.cardsCount,
-        syncStatusFlow
-    ) { items, count, status ->
+        syncStatusFlow,
+        userPrefsFlow
+    ) { items, count, status, userPrefs ->
+        val shouldShowSupport = userPrefs.onboarding.isHeavyMood && !userPrefs.supportShown
+        val shouldShowMoodRecheck = userPrefs.swipes >= 25
         FeedUiState(
             items = items,
             totalCount = count,
             isLoading = status.loading && items.isEmpty(),
             isSyncing = status.syncing,
             isOffline = status.offline,
-            syncStatusMessage = status.message
+            syncStatusMessage = status.message,
+            showSupportBanner = shouldShowSupport,
+            showMoodRecheck = shouldShowMoodRecheck,
+            currentMood = userPrefs.onboarding.mood,
+            availableMoods = userPrefs.moods
         )
     }.stateIn(
         scope = viewModelScope,
@@ -175,6 +205,33 @@ class FeedViewModel @Inject constructor(
     fun onReflect(cardId: String) {
         viewModelScope.launch {
             repository.recordInteraction(cardId = cardId, type = "reflect", dwellMs = 0)
+        }
+    }
+
+    fun onPrayed(cardId: String, noteText: String) {
+        viewModelScope.launch {
+            repository.saveJournalNote(cardId, noteText)
+            _userFeedbackEvent.emit("Saved to your private journal")
+        }
+    }
+
+    fun dismissSupportBanner() {
+        viewModelScope.launch {
+            dataStore.markSupportMessageShown()
+        }
+    }
+
+    fun onMoodRechecked(newMood: String) {
+        viewModelScope.launch {
+            repository.updateMood(newMood)
+            dataStore.resetSwipeCount()
+            _userFeedbackEvent.emit("Tuning cards for feeling $newMood")
+        }
+    }
+
+    fun dismissMoodRecheck() {
+        viewModelScope.launch {
+            dataStore.resetSwipeCount()
         }
     }
 }
