@@ -7,6 +7,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -26,7 +27,9 @@ import com.holything.app.ui.screens.saved.SavedViewModel
 
 @Composable
 fun HolyThingNavHost(
-    navController: NavHostController = rememberNavController()
+    navController: NavHostController = rememberNavController(),
+    notificationCardId: String? = null,
+    onClearNotificationCard: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -37,6 +40,18 @@ fun HolyThingNavHost(
     val feedViewModel: FeedViewModel = hiltViewModel()
     val savedViewModel: SavedViewModel = hiltViewModel()
     val profileViewModel: ProfileViewModel = hiltViewModel()
+
+    // When app is opened via notification, navigate directly to that card in the feed
+    LaunchedEffect(notificationCardId) {
+        val targetId = notificationCardId
+        if (!targetId.isNullOrBlank()) {
+            feedViewModel.openCardInFeed(targetId)
+            navController.navigate(Screen.FeedPager.route) {
+                launchSingleTop = true
+            }
+            onClearNotificationCard()
+        }
+    }
 
     Scaffold(
         bottomBar = {

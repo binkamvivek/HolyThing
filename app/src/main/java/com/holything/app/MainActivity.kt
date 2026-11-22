@@ -1,5 +1,6 @@
 package com.holything.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -7,17 +8,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Modifier
-import androidx.lifecycle.lifecycleScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.holything.app.core.reminder.DailyReminderWorker
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.ui.navigation.HolyThingNavHost
 import com.holything.app.ui.theme.HolyThingTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -26,9 +23,16 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var dataStore: UserPreferencesDataStore
 
+    private var notificationCardId by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val initialCard = intent?.getStringExtra(DailyReminderWorker.EXTRA_CARD_ID)
+        if (!initialCard.isNullOrBlank()) {
+            notificationCardId = initialCard
+        }
 
         setContent {
             val textScale by dataStore.textScale.collectAsState(initial = 1.0f)
@@ -44,9 +48,20 @@ class MainActivity : ComponentActivity() {
                 darkTheme = isDark,
                 textScaleFactor = textScale
             ) {
-                HolyThingNavHost()
+                HolyThingNavHost(
+                    notificationCardId = notificationCardId,
+                    onClearNotificationCard = { notificationCardId = null }
+                )
             }
         }
     }
-}
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val cardId = intent.getStringExtra(DailyReminderWorker.EXTRA_CARD_ID)
+        if (!cardId.isNullOrBlank()) {
+            notificationCardId = cardId
+        }
+    }
+}

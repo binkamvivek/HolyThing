@@ -23,6 +23,10 @@ data class ProfileUiState(
     val translation: String = "WEB",
     val reminderEnabled: Boolean = false,
     val reminderTime: String = "08:00",
+    val randomReminderEnabled: Boolean = false,
+    val reminderStartTime: String = "09:00",
+    val reminderEndTime: String = "21:00",
+    val reminderFrequency: Int = 2,
     val streakInfo: StreakInfo = StreakInfo()
 )
 
@@ -36,34 +40,62 @@ class ProfileViewModel @Inject constructor(
     private val _messageEvent = MutableSharedFlow<String>()
     val messageEvent: SharedFlow<String> = _messageEvent.asSharedFlow()
 
-    private data class PreferenceState(
-        val scale: Float,
-        val mode: String,
-        val translation: String,
-        val reminderEnabled: Boolean,
-        val reminderTime: String
+    private data class ReminderPrefs(
+        val enabled: Boolean,
+        val reminderTime: String,
+        val randomEnabled: Boolean,
+        val startTime: String,
+        val endTime: String,
+        val frequency: Int
     )
 
-    private val prefsFlow = combine(
+    private val randomPrefsFlow = combine(
+        dataStore.randomReminderEnabled,
+        dataStore.reminderStartTime,
+        dataStore.reminderEndTime,
+        dataStore.reminderFrequency
+    ) { randomEnabled, startTime, endTime, frequency ->
+        listOf(randomEnabled, startTime, endTime, frequency)
+    }
+
+    private val reminderPrefsFlow = combine(
+        dataStore.reminderEnabled,
+        dataStore.reminderTime,
+        randomPrefsFlow
+    ) { enabled, time, randomList ->
+        ReminderPrefs(
+            enabled = enabled,
+            reminderTime = time,
+            randomEnabled = randomList[0] as Boolean,
+            startTime = randomList[1] as String,
+            endTime = randomList[2] as String,
+            frequency = randomList[3] as Int
+        )
+    }
+
+    private val generalPrefsFlow = combine(
         dataStore.textScale,
         dataStore.darkModeConfig,
-        dataStore.translation,
-        dataStore.reminderEnabled,
-        dataStore.reminderTime
-    ) { scale, mode, trans, remEnabled, remTime ->
-        PreferenceState(scale, mode, trans, remEnabled, remTime)
+        dataStore.translation
+    ) { scale, mode, translation ->
+        Triple(scale, mode, translation)
     }
 
     val uiState: StateFlow<ProfileUiState> = combine(
-        prefsFlow,
+        generalPrefsFlow,
+        reminderPrefsFlow,
         repository.streakInfo
-    ) { prefs, streak ->
+    ) { general, rem, streak ->
         ProfileUiState(
-            textScale = prefs.scale,
-            darkModeConfig = prefs.mode,
-            translation = prefs.translation,
-            reminderEnabled = prefs.reminderEnabled,
-            reminderTime = prefs.reminderTime,
+            textScale = general.first,
+            darkModeConfig = general.second,
+            translation = general.third,
+            reminderEnabled = rem.enabled,
+            reminderTime = rem.reminderTime,
+            randomReminderEnabled = rem.randomEnabled,
+            reminderStartTime = rem.startTime,
+            reminderEndTime = rem.endTime,
+            reminderFrequency = rem.frequency,
             streakInfo = streak
         )
     }.stateIn(
@@ -96,7 +128,7 @@ class ProfileViewModel @Inject constructor(
             if (enabled) {
                 reminderScheduler.scheduleDailyReminder(uiState.value.reminderTime)
             } else {
-                reminderScheduler.cancelReminder()
+                reminderScheduler.cancelDailyReminder()
             }
         }
     }
@@ -106,6 +138,60 @@ class ProfileViewModel @Inject constructor(
             dataStore.setReminderTime(time)
             if (uiState.value.reminderEnabled) {
                 reminderScheduler.scheduleDailyReminder(time)
+            }
+        }
+    }
+
+    fun setRandomReminderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            dataStore.setRandomReminderEnabled(enabled)
+            if (enabled) {
+                reminderScheduler.scheduleRandomReminders(
+                    startTimeStr = uiState.value.reminderStartTime,
+                    endTimeStr = uiState.value.reminderEndTime,
+                    frequency = uiState.value.reminderFrequency
+                )
+            } else {
+                reminderScheduler.cancelRandomReminders()
+            }
+        }
+    }
+
+    fun setReminderStartTime(time: String) {
+        viewModelScope.launch {
+            dataStore.setReminderWindow(time, uiState.value.reminderEndTime)
+            if (uiState.value.randomReminderEnabled) {
+                reminderScheduler.scheduleRandomReminders(
+                    startTimeStr = time,
+                    endTimeStr = uiState.value.reminderEndTime,
+                    frequency = uiState.value.reminderFrequency
+                )
+            }
+        }
+    }
+
+    fun setReminderEndTime(time: String) {
+        viewModelScope.launch {
+            dataStore.setReminderWindow(uiState.value.reminderStartTime, time)
+            if (uiState.value.randomReminderEnabled) {
+                reminderScheduler.scheduleRandomReminders(
+                    startTimeStr = uiState.value.reminderStartTime,
+                    endTimeStr = time,
+                    frequency = uiState.value.reminderFrequency
+                )
+            }
+        }
+    }
+
+    fun setReminderFrequency(frequency: Int) {
+        viewModelScope.launch {
+            dataStore.setReminderFrequency(frequency)
+            if (uiState.value.randomReminderEnabled) {
+                reminderScheduler.scheduleRandomReminders(
+                    startTimeStr = uiState.value.reminderStartTime,
+                    endTimeStr = uiState.value.reminderEndTime,
+                    frequency = frequency
+                )
             }
         }
     }
@@ -123,7 +209,7 @@ class ProfileViewModel @Inject constructor(
 
     fun deleteMyData() {
         viewModelScope.launch {
-            reminderScheduler.cancelReminder()
+            reminderScheduler.cancelAllReminders()
             repository.clearAllData()
         }
     }

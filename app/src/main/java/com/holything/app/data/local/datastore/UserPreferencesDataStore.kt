@@ -47,6 +47,10 @@ class UserPreferencesDataStore @Inject constructor(
         val KEY_TRANSLATION = stringPreferencesKey("pref_bible_translation")
         val KEY_REMINDER_ENABLED = booleanPreferencesKey("pref_reminder_enabled")
         val KEY_REMINDER_TIME = stringPreferencesKey("pref_reminder_time")
+        val KEY_RANDOM_REMINDER_ENABLED = booleanPreferencesKey("pref_random_reminder_enabled")
+        val KEY_REMINDER_START_TIME = stringPreferencesKey("pref_reminder_start_time")
+        val KEY_REMINDER_END_TIME = stringPreferencesKey("pref_reminder_end_time")
+        val KEY_REMINDER_FREQUENCY = intPreferencesKey("pref_reminder_frequency")
         val KEY_REMINDER_IGNORED_COUNT = intPreferencesKey("pref_reminder_ignored_count")
         val KEY_HAS_PROMPTED_NOTIFICATION = booleanPreferencesKey("pref_has_prompted_notif")
     }
@@ -61,6 +65,22 @@ class UserPreferencesDataStore @Inject constructor(
 
     val reminderTime: Flow<String> = dataStore.data.map { prefs ->
         prefs[KEY_REMINDER_TIME] ?: "08:00"
+    }
+
+    val randomReminderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_RANDOM_REMINDER_ENABLED] ?: false
+    }
+
+    val reminderStartTime: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_REMINDER_START_TIME] ?: "09:00"
+    }
+
+    val reminderEndTime: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_REMINDER_END_TIME] ?: "21:00"
+    }
+
+    val reminderFrequency: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[KEY_REMINDER_FREQUENCY] ?: 2
     }
 
     val reminderIgnoredCount: Flow<Int> = dataStore.data.map { prefs ->
@@ -205,6 +225,25 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun setReminderTime(time: String) {
         dataStore.edit { prefs ->
             prefs[KEY_REMINDER_TIME] = time
+        }
+    }
+
+    suspend fun setRandomReminderEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_RANDOM_REMINDER_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setReminderWindow(startTime: String, endTime: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_REMINDER_START_TIME] = startTime
+            prefs[KEY_REMINDER_END_TIME] = endTime
+        }
+    }
+
+    suspend fun setReminderFrequency(frequency: Int) {
+        dataStore.edit { prefs ->
+            prefs[KEY_REMINDER_FREQUENCY] = frequency
         }
     }
 

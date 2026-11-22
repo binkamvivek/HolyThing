@@ -273,7 +273,23 @@ class FeedViewModel @Inject constructor(
     }
 
     fun openCardInFeed(cardId: String) {
-        _targetScrollCardId.value = cardId
+        viewModelScope.launch {
+            val currentItems = _feedItemsFlow.value
+            val existingIndex = currentItems.indexOfFirst { it.card.id == cardId }
+            if (existingIndex >= 0) {
+                _targetScrollCardId.value = cardId
+            } else {
+                val card = repository.getCardById(cardId)
+                if (card != null) {
+                    val newItem = FeedCardItem(
+                        card = card,
+                        recommendationReason = "From daily invitation"
+                    )
+                    _feedItemsFlow.value = listOf(newItem) + currentItems
+                }
+                _targetScrollCardId.value = cardId
+            }
+        }
     }
 
     fun onScrolledToTargetCard() {
