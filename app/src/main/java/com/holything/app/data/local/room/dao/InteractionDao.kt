@@ -15,6 +15,18 @@ interface InteractionDao {
     @Query("SELECT * FROM interactions ORDER BY timestamp DESC")
     fun getAllInteractions(): Flow<List<InteractionEntity>>
 
+    @Query("SELECT DISTINCT cardId FROM interactions WHERE timestamp >= :sinceTimestamp AND type IN ('dwell', 'fast_skip')")
+    suspend fun getRecentlySeenCardIds(sinceTimestamp: Long): List<String>
+
+    @Query("SELECT DISTINCT cardId FROM interactions WHERE type = 'amen'")
+    fun getAmenedCardIds(): Flow<List<String>>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM interactions WHERE cardId = :cardId AND type = 'amen')")
+    suspend fun isCardAmened(cardId: String): Boolean
+
+    @Query("DELETE FROM interactions WHERE cardId = :cardId AND type = 'amen'")
+    suspend fun removeAmen(cardId: String)
+
     @Query("DELETE FROM interactions")
     suspend fun clearAll()
 }

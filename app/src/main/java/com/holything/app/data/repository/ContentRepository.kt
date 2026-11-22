@@ -7,7 +7,14 @@ import com.holything.app.data.local.room.dao.CardDao
 import com.holything.app.data.remote.HolyThingApiService
 import com.holything.app.data.remote.dto.SyncResponseDto
 import com.holything.app.domain.model.Card
+import com.holything.app.data.local.room.dao.InteractionDao
+import com.holything.app.data.local.room.dao.SavedCardDao
+import com.holything.app.data.local.room.entity.InteractionEntity
+import com.holything.app.data.local.room.entity.SavedCardEntity
+import com.holything.app.domain.model.FeedCardItem
 import com.holything.app.domain.model.SyncResult
+import com.holything.app.domain.usecase.FeedPacingEngine
+import kotlinx.coroutines.flow.combine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +31,8 @@ class ContentRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val apiService: HolyThingApiService,
     private val cardDao: CardDao,
+    private val interactionDao: InteractionDao,
+    private val savedCardDao: SavedCardDao,
     private val dataStore: UserPreferencesDataStore,
     private val json: Json
 ) {
@@ -32,6 +41,69 @@ class ContentRepository @Inject constructor(
     }
 
     val cardsCount: Flow<Int> = cardDao.getActiveCardsCount()
+
+    val amenedCardIds: Flow<List<String>> = interactionDao.getAmenedCardIds()
+    val savedCardIds: Flow<List<String>> = savedCardDao.getAllSavedCardIds()
+
+    /**
+     * Emits a paced, shuffled feed with anti-repetition rules and 30-day recency filter applied.
+     */
+    fun getFeedCards(): Flow<List<FeedCardItem>> {
+        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
+        return combine(
+            cards,
+            amenedCardIds,
+            savedCardIds
+        ) { rawCards, amenedList, savedList ->
+            val seenCardIds = interactionDao.getRecentlySeenCardIds(thirtyDaysAgo).toSet()
+            FeedPacingEngine.paceFeed(
+                cards = rawCards,
+                seenCardIds = seenCardIds,
+                amenedCardIds = amenedList.toSet(),
+                savedCardIds = savedList.toSet()
+            )
+        }
+    }
+
+    suspend fun recordInteraction(cardId: String, type: String, dwellMs: Long = 0) {
+        withContext(Dispatchers.IO) {
+            interactionDao.insertInteraction(
+                InteractionEntity(
+                    cardId = cardId,
+                    type = type,
+                    dwellMs = dwellMs
+                )
+            )
+        }
+    }
+
+    suspend fun toggleAmen(cardId: String): Boolean = withContext(Dispatchers.IO) {
+        val alreadyAmened = interactionDao.isCardAmened(cardId)
+        if (alreadyAmened) {
+            interactionDao.removeAmen(cardId)
+            false
+        } else {
+            interactionDao.insertInteraction(
+                InteractionEntity(
+                    cardId = cardId,
+                    type = "amen",
+                    dwellMs = 0
+                )
+            )
+            true
+        }
+    }
+
+    suspend fun toggleSave(cardId: String): Boolean = withContext(Dispatchers.IO) {
+        val alreadySaved = savedCardDao.isCardSavedDirect(cardId)
+        if (alreadySaved) {
+            savedCardDao.removeSavedCard(cardId)
+            false
+        } else {
+            savedCardDao.saveCard(SavedCardEntity(cardId = cardId))
+            true
+        }
+    }
 
     suspend fun syncContent(): Result<SyncResult> = withContext(Dispatchers.IO) {
         val localVersion = dataStore.lastSyncedVersion.first()
@@ -119,6 +191,8 @@ class ContentRepository @Inject constructor(
 
     suspend fun clearAllData() {
         cardDao.clearAll()
+        interactionDao.clearAll()
+        savedCardDao.clearAll()
         dataStore.clearAll()
     }
 }

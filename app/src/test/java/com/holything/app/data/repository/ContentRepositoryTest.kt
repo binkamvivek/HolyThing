@@ -3,6 +3,8 @@ package com.holything.app.data.repository
 import android.content.Context
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.data.local.room.dao.CardDao
+import com.holything.app.data.local.room.dao.InteractionDao
+import com.holything.app.data.local.room.dao.SavedCardDao
 import com.holything.app.data.remote.HolyThingApiService
 import com.holything.app.data.remote.dto.CardDto
 import com.holything.app.data.remote.dto.SyncResponseDto
@@ -24,6 +26,8 @@ class ContentRepositoryTest {
     private val context: Context = mockk(relaxed = true)
     private val apiService: HolyThingApiService = mockk()
     private val cardDao: CardDao = mockk(relaxed = true)
+    private val interactionDao: InteractionDao = mockk(relaxed = true)
+    private val savedCardDao: SavedCardDao = mockk(relaxed = true)
     private val dataStore: UserPreferencesDataStore = mockk(relaxed = true)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -35,6 +39,8 @@ class ContentRepositoryTest {
             context = context,
             apiService = apiService,
             cardDao = cardDao,
+            interactionDao = interactionDao,
+            savedCardDao = savedCardDao,
             dataStore = dataStore,
             json = json
         )

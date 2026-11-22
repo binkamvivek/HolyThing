@@ -18,6 +18,12 @@ interface SavedCardDao {
     @Query("SELECT EXISTS(SELECT 1 FROM saved_cards WHERE cardId = :cardId)")
     fun isCardSaved(cardId: String): Flow<Boolean>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM saved_cards WHERE cardId = :cardId)")
+    suspend fun isCardSavedDirect(cardId: String): Boolean
+
+    @Query("SELECT DISTINCT cardId FROM saved_cards")
+    fun getAllSavedCardIds(): Flow<List<String>>
+
     @Query("SELECT * FROM saved_cards ORDER BY savedAt DESC")
     fun getAllSavedCards(): Flow<List<SavedCardEntity>>
 

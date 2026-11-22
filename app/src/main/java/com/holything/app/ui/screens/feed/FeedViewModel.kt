@@ -2,49 +2,75 @@ package com.holything.app.ui.screens.feed
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.data.repository.ContentRepository
 import com.holything.app.domain.model.Card
+import com.holything.app.domain.model.FeedCardItem
 import com.holything.app.domain.model.SyncResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class FeedUiState(
-    val cards: List<Card> = emptyList(),
+    val items: List<FeedCardItem> = emptyList(),
     val totalCount: Int = 0,
-    val lastSyncedVersion: String? = null,
+    val isLoading: Boolean = true,
     val isSyncing: Boolean = false,
-    val lastSyncMessage: String = "Ready"
+    val isOffline: Boolean = false,
+    val syncStatusMessage: String = "Ready"
 )
 
 @HiltViewModel
 class FeedViewModel @Inject constructor(
-    private val repository: ContentRepository,
-    private val dataStore: UserPreferencesDataStore
+    private val repository: ContentRepository
 ) : ViewModel() {
 
+    private val isLoadingFlow = MutableStateFlow(true)
     private val isSyncingFlow = MutableStateFlow(false)
-    private val syncMessageFlow = MutableStateFlow("Initializing...")
+    private val isOfflineFlow = MutableStateFlow(false)
+    private val statusMessageFlow = MutableStateFlow("Loading scripture...")
+
+    private val _userFeedbackEvent = MutableSharedFlow<String>()
+    val userFeedbackEvent: SharedFlow<String> = _userFeedbackEvent.asSharedFlow()
+
+    private var currentPageIndex = 0
+    private var pageStartTime = System.currentTimeMillis()
+
+    private data class SyncStatus(
+        val loading: Boolean,
+        val syncing: Boolean,
+        val offline: Boolean,
+        val message: String
+    )
+
+    private val syncStatusFlow = combine(
+        isLoadingFlow,
+        isSyncingFlow,
+        isOfflineFlow,
+        statusMessageFlow
+    ) { loading, syncing, offline, msg ->
+        SyncStatus(loading, syncing, offline, msg)
+    }
 
     val uiState: StateFlow<FeedUiState> = combine(
-        repository.cards,
+        repository.getFeedCards(),
         repository.cardsCount,
-        dataStore.lastSyncedVersion,
-        isSyncingFlow,
-        syncMessageFlow
-    ) { cards, count, version, syncing, msg ->
+        syncStatusFlow
+    ) { items, count, status ->
         FeedUiState(
-            cards = cards,
+            items = items,
             totalCount = count,
-            lastSyncedVersion = version,
-            isSyncing = syncing,
-            lastSyncMessage = msg
+            isLoading = status.loading && items.isEmpty(),
+            isSyncing = status.syncing,
+            isOffline = status.offline,
+            syncStatusMessage = status.message
         )
     }.stateIn(
         scope = viewModelScope,
@@ -59,21 +85,96 @@ class FeedViewModel @Inject constructor(
     fun syncContent() {
         viewModelScope.launch {
             isSyncingFlow.value = true
-            syncMessageFlow.value = "Syncing with cloud..."
             val result = repository.syncContent()
             isSyncingFlow.value = false
-            
-            result.onSuccess { syncRes ->
-                syncMessageFlow.value = when (syncRes) {
-                    is SyncResult.Synced -> "Synced ${syncRes.updatedCount} cards (v${syncRes.version.take(8)})"
-                    is SyncResult.UpToDate -> "Up to date (v${syncRes.version.take(8)})"
-                    is SyncResult.FallbackLoaded -> "Loaded ${syncRes.count} bundled cards (offline seed)"
-                    is SyncResult.Offline -> "Offline mode (${syncRes.localCount} cards available)"
+            isLoadingFlow.value = false
+
+            result.onSuccess { syncResult ->
+                when (syncResult) {
+                    is SyncResult.Synced -> {
+                        isOfflineFlow.value = false
+                        statusMessageFlow.value = "Synced ${syncResult.updatedCount} cards"
+                    }
+                    is SyncResult.UpToDate -> {
+                        isOfflineFlow.value = false
+                        statusMessageFlow.value = "Feed up to date"
+                    }
+                    is SyncResult.FallbackLoaded -> {
+                        isOfflineFlow.value = true
+                        statusMessageFlow.value = "Loaded offline seed cards"
+                    }
+                    is SyncResult.Offline -> {
+                        isOfflineFlow.value = true
+                        statusMessageFlow.value = "Offline mode"
+                    }
                 }
-            }.onFailure { err ->
-                syncMessageFlow.value = "Sync error: ${err.message}"
+            }.onFailure {
+                isOfflineFlow.value = true
+                statusMessageFlow.value = "Using offline library"
             }
         }
     }
-}
 
+    /**
+     * Dwell tracking: records duration the user stayed on the card.
+     * Flags fast-skips (< 1.5s) to avoid repeating unwanted cards.
+     */
+    fun onPageChanged(newIndex: Int) {
+        val items = uiState.value.items
+        if (currentPageIndex in items.indices) {
+            val previousCard = items[currentPageIndex].card
+            val dwellMs = System.currentTimeMillis() - pageStartTime
+            val interactionType = if (dwellMs < 1500) "fast_skip" else "dwell"
+
+            viewModelScope.launch {
+                repository.recordInteraction(
+                    cardId = previousCard.id,
+                    type = interactionType,
+                    dwellMs = dwellMs
+                )
+            }
+        }
+        currentPageIndex = newIndex
+        pageStartTime = System.currentTimeMillis()
+    }
+
+    fun onAmenToggle(cardId: String) {
+        viewModelScope.launch {
+            val added = repository.toggleAmen(cardId)
+            _userFeedbackEvent.emit(if (added) "Amen" else "Amen removed")
+        }
+    }
+
+    fun onSaveToggle(cardId: String) {
+        viewModelScope.launch {
+            val added = repository.toggleSave(cardId)
+            _userFeedbackEvent.emit(if (added) "Saved to your library" else "Removed from Saved")
+        }
+    }
+
+    fun onShare(card: Card) {
+        viewModelScope.launch {
+            repository.recordInteraction(cardId = card.id, type = "share", dwellMs = 0)
+        }
+    }
+
+    fun onMoreLikeThis(cardId: String) {
+        viewModelScope.launch {
+            repository.recordInteraction(cardId = cardId, type = "more_like_this", dwellMs = 0)
+            _userFeedbackEvent.emit("We'll show you more passages like this")
+        }
+    }
+
+    fun onLessLikeThis(cardId: String) {
+        viewModelScope.launch {
+            repository.recordInteraction(cardId = cardId, type = "less_like_this", dwellMs = 0)
+            _userFeedbackEvent.emit("We'll show you fewer cards like this")
+        }
+    }
+
+    fun onReflect(cardId: String) {
+        viewModelScope.launch {
+            repository.recordInteraction(cardId = cardId, type = "reflect", dwellMs = 0)
+        }
+    }
+}
