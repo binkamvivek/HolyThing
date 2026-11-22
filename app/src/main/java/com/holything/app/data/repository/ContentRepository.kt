@@ -306,6 +306,10 @@ class ContentRepository @Inject constructor(
         }
     }
 
+    suspend fun getActiveCardsList(): List<Card> = withContext(Dispatchers.IO) {
+        cardDao.getActiveCardsList().map { it.toDomain() }
+    }
+
     suspend fun updateMood(newMood: String) = withContext(Dispatchers.IO) {
         val current = dataStore.onboardingPreferences.first()
         val updated = current.copy(mood = newMood, isHeavyMood = newMood.lowercase() in OnboardingPreferences.HEAVY_MOODS)

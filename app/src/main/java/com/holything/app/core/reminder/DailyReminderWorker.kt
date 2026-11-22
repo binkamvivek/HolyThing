@@ -81,9 +81,10 @@ class DailyReminderWorker @AssistedInject constructor(
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Daily Scripture Reminder",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Gentle daily invitation to read and reflect on Scripture."
+                enableVibration(true)
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -107,7 +108,8 @@ class DailyReminderWorker @AssistedInject constructor(
             .setStyle(NotificationCompat.BigTextStyle().bigText(hookText))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
 
         notificationManager.notify(NOTIFICATION_ID, notification)

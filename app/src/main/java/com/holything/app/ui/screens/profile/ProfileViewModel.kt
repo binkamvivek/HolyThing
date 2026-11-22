@@ -7,8 +7,11 @@ import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.data.repository.ContentRepository
 import com.holything.app.domain.model.StreakInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -29,6 +32,9 @@ class ProfileViewModel @Inject constructor(
     private val repository: ContentRepository,
     private val reminderScheduler: ReminderScheduler
 ) : ViewModel() {
+
+    private val _messageEvent = MutableSharedFlow<String>()
+    val messageEvent: SharedFlow<String> = _messageEvent.asSharedFlow()
 
     private data class PreferenceState(
         val scale: Float,
@@ -101,6 +107,17 @@ class ProfileViewModel @Inject constructor(
             if (uiState.value.reminderEnabled) {
                 reminderScheduler.scheduleDailyReminder(time)
             }
+        }
+    }
+
+    fun sendTestNotification() {
+        viewModelScope.launch {
+            val cards = repository.getActiveCardsList()
+            val chosen = cards.shuffled().firstOrNull()
+            val hook = chosen?.hook ?: "Pause, breathe, and rest in Scripture today."
+            val cardId = chosen?.id ?: ""
+            reminderScheduler.postNotificationImmediately(cardId, hook)
+            _messageEvent.emit("Notification sent! Check your notification tray.")
         }
     }
 
