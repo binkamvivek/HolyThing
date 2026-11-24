@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.holything.app.core.Constants
 import com.holything.app.data.local.room.HolyThingDatabase
+import com.holything.app.data.local.room.dao.BetaProfileDao
 import com.holything.app.data.local.room.dao.CardDao
 import com.holything.app.data.local.room.dao.InteractionDao
 import com.holything.app.data.local.room.dao.JournalNoteDao
@@ -48,5 +49,8 @@ object DatabaseModule {
 
     @Provides
     fun provideSignalDao(database: HolyThingDatabase): SignalDao = database.signalDao()
+
+    @Provides
+    fun provideBetaProfileDao(database: HolyThingDatabase): BetaProfileDao = database.betaProfileDao()
 }
 

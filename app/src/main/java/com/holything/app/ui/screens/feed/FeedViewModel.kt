@@ -9,8 +9,11 @@ import com.holything.app.domain.model.FeedCardItem
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.domain.model.OnboardingPreferences
 import com.holything.app.domain.model.SyncResult
+import com.holything.app.domain.ranking.AdaptiveFeedRanker
 import com.holything.app.domain.signal.SignalScoringConfig
+import com.holything.app.domain.state.UserStateEstimator
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -19,10 +22,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class FeedUiState(
@@ -43,7 +48,8 @@ data class FeedUiState(
 class FeedViewModel @Inject constructor(
     private val repository: ContentRepository,
     private val dataStore: UserPreferencesDataStore,
-    private val signalCaptureManager: SignalCaptureManager
+    private val signalCaptureManager: SignalCaptureManager,
+    private val userStateEstimator: UserStateEstimator
 ) : ViewModel() {
 
     private val isLoadingFlow = MutableStateFlow(true)
@@ -140,6 +146,38 @@ class FeedViewModel @Inject constructor(
                         _feedItemsFlow.value = _feedItemsFlow.value + toAppend
                     }
                 }
+            }
+        }
+        // Background re-ranking when user state updates:
+        // Lock current card + next 2 queued cards so the visible feed never jumps.
+        viewModelScope.launch {
+            userStateEstimator.state.drop(1).collect {
+                val currentList = _feedItemsFlow.value
+                if (currentList.isEmpty()) return@collect
+
+                val lockEndExclusive = (currentPageIndex + 3).coerceAtMost(currentList.size)
+                val lockedPrefix = currentList.subList(0, lockEndExclusive).toList()
+                val lockedIds = lockedPrefix.filterNot { it.isPauseCard }.map { it.card.id }.toSet()
+
+                val rerankedTail = repository.rerankTailCards(
+                    lockedCardIds = lockedIds,
+                    seriesState = signalCaptureManager.seriesState.value
+                )
+
+                val combined = withContext(Dispatchers.Default) {
+                    val lockedRealCount = lockedPrefix.count { !it.isPauseCard }
+                    val tailWithPauses = mutableListOf<FeedCardItem>()
+                    var realCount = lockedRealCount
+                    rerankedTail.forEach { item ->
+                        tailWithPauses.add(item)
+                        realCount += 1
+                        if (realCount % 25 == 0) {
+                            tailWithPauses.add(FeedCardItem.createPauseCard(realCount, item.card))
+                        }
+                    }
+                    lockedPrefix + tailWithPauses
+                }
+                _feedItemsFlow.value = combined
             }
         }
         syncContent()

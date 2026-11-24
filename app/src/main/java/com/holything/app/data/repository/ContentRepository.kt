@@ -27,12 +27,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.InputStreamReader
+import com.holything.app.data.local.room.dao.BetaProfileDao
 import com.holything.app.data.local.room.dao.JournalNoteDao
 import com.holything.app.data.local.room.dao.ReadingDayDao
 import com.holything.app.data.local.room.entity.JournalNoteEntity
 import com.holything.app.data.local.room.entity.ReadingDayEntity
 import com.holything.app.domain.engine.StreakCalculator
 import com.holything.app.domain.model.StreakInfo
+import com.holything.app.domain.ranking.AdaptiveFeedRanker
+import com.holything.app.domain.ranking.LongTermBetaProfile
+import com.holything.app.domain.ranking.SessionSeriesState
+import com.holything.app.domain.state.UserStateEstimator
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -47,6 +52,8 @@ class ContentRepository @Inject constructor(
     private val savedCardDao: SavedCardDao,
     private val journalNoteDao: JournalNoteDao,
     private val readingDayDao: ReadingDayDao,
+    private val betaProfileDao: BetaProfileDao,
+    private val userStateEstimator: UserStateEstimator,
     private val dataStore: UserPreferencesDataStore,
     private val json: Json
 ) {
@@ -107,25 +114,56 @@ class ContentRepository @Inject constructor(
             val seenCardIds = interactionDao.getRecentlySeenCardIdsBefore(thirtyDaysAgo, sessionStartTime).toSet()
             val amenedList = interactionDao.getAmenedCardIds().first()
             val savedList = savedCardDao.getAllSavedCardIds().first()
-            val tasteJson = dataStore.tasteProfileJson.first()
-            val tasteProfile = tasteJson?.let {
-                try { json.decodeFromString<TasteProfile>(it) } catch (e: Exception) { null }
-            } ?: TasteProfileEngine.createFromOnboarding(onboardingPrefs)
-
             val currentSwipeCount = dataStore.swipeCount.first()
+            val betaProfile = LongTermBetaProfile.fromEntities(betaProfileDao.getAllAffinitiesList())
 
-            FeedRankingEngine.rankFeed(
+            AdaptiveFeedRanker.rankFeed(
                 allCards = rawCards,
-                tasteProfile = tasteProfile,
+                userState = userStateEstimator.state.value,
+                betaProfile = betaProfile,
                 onboardingPrefs = onboardingPrefs,
                 seenCardIds = seenCardIds,
                 amenedCardIds = amenedList.toSet(),
                 savedCardIds = savedList.toSet(),
-                lastInteractedCard = lastInteractedCard,
-                swipeCount = currentSwipeCount,
-                initialMoodHint = moodHint
+                seriesState = SessionSeriesState(),
+                swipeCount = currentSwipeCount
             )
         }
+    }
+
+    /**
+     * Re-ranks only the remaining cards outside the locked prefix (current + next 2 cards),
+     * running off the main thread so scrolling remains smooth.
+     */
+    suspend fun rerankTailCards(
+        lockedCardIds: Set<String>,
+        seriesState: SessionSeriesState
+    ): List<FeedCardItem> = withContext(Dispatchers.Default) {
+        val rawCards = cards.first()
+        if (rawCards.isEmpty()) return@withContext emptyList()
+
+        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
+        val seenCardIds = interactionDao.getRecentlySeenCardIdsBefore(thirtyDaysAgo, sessionStartTime).toSet() + lockedCardIds
+        val amenedList = interactionDao.getAmenedCardIds().first()
+        val savedList = savedCardDao.getAllSavedCardIds().first()
+        val onboardingPrefs = dataStore.onboardingPreferences.first()
+        val currentSwipeCount = dataStore.swipeCount.first()
+        val betaProfile = LongTermBetaProfile.fromEntities(betaProfileDao.getAllAffinitiesList())
+
+        val remainingPool = rawCards.filterNot { it.id in lockedCardIds }
+        if (remainingPool.isEmpty()) return@withContext emptyList()
+
+        AdaptiveFeedRanker.rankFeed(
+            allCards = remainingPool,
+            userState = userStateEstimator.state.value,
+            betaProfile = betaProfile,
+            onboardingPrefs = onboardingPrefs,
+            seenCardIds = seenCardIds,
+            amenedCardIds = amenedList.toSet(),
+            savedCardIds = savedList.toSet(),
+            seriesState = seriesState,
+            swipeCount = currentSwipeCount
+        ).filterNot { it.isPauseCard }
     }
 
     suspend fun recordInteraction(cardId: String, type: String, dwellMs: Long = 0) {

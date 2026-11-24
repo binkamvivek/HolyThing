@@ -1,0 +1,512 @@
+package com.holything.app.domain.ranking
+
+import com.holything.app.domain.model.Card
+import com.holything.app.domain.model.FeedCardItem
+import com.holything.app.domain.model.OnboardingPreferences
+import com.holything.app.domain.state.SessionMode
+import com.holything.app.domain.state.UserStateEstimate
+import kotlin.math.roundToInt
+import kotlin.random.Random
+
+/**
+ * Tracks story series state within an active reading session.
+ */
+data class SessionSeriesState(
+    val pendingNextParts: Map<String, Int> = emptyMap(),
+    val droppedSeriesIds: Set<String> = emptySet()
+)
+
+/**
+ * Tunable weights and exploration bounds for the adaptive feed ranker.
+ */
+object AdaptiveRankerConfig {
+    const val WEIGHT_MOOD_MATCH = 3.0f
+    const val WEIGHT_TOPIC_THOMPSON = 2.5f
+    const val WEIGHT_TONE_AFFINITY = 1.2f
+    const val WEIGHT_FORMAT_THOMPSON = 2.0f
+    const val WEIGHT_SESSION_FORMAT_FIT = 2.2f
+    const val WEIGHT_LENGTH_FIT = 1.5f
+    const val WEIGHT_SERIES_CONTINUATION = 4.0f
+
+    const val BASE_BEST_RATIO = 0.70f
+    const val BASE_ADJACENT_RATIO = 0.20f
+    const val BASE_WILDCARD_RATIO = 0.10f
+    const val MIN_WILDCARD_RATIO = 0.10f
+
+    const val NEW_USER_INTERACTION_THRESHOLD = 15
+    const val SERIES_INSERT_WINDOW_MAX = 3
+    const val PAUSE_CARD_INTERVAL = 25
+}
+
+/**
+ * Standalone, deterministic-seedable feed ranker using Phase 3 UserStateEstimate
+ * and the Room-backed LongTermBetaProfile with Thompson sampling.
+ */
+object AdaptiveFeedRanker {
+
+    private val ADJACENT_TOPICS: Map<String, Set<String>> = mapOf(
+        "peace" to setOf("anxiety", "comfort", "prayer", "rest"),
+        "anxiety" to setOf("peace", "strength", "comfort", "prayer"),
+        "hope" to setOf("faith", "patience", "grief", "love"),
+        "grief" to setOf("comfort", "hope", "love", "peace"),
+        "strength" to setOf("patience", "faith", "temptation", "courage"),
+        "forgiveness" to setOf("love", "anger", "patience", "grace"),
+        "anger" to setOf("patience", "forgiveness", "peace"),
+        "gratitude" to setOf("prayer", "faith", "hope", "joy"),
+        "wisdom" to setOf("purpose", "work", "identity"),
+        "purpose" to setOf("identity", "wisdom", "faith", "work"),
+        "love" to setOf("relationships", "forgiveness", "comfort")
+    )
+
+    fun rankFeed(
+        allCards: List<Card>,
+        userState: UserStateEstimate,
+        betaProfile: LongTermBetaProfile,
+        onboardingPrefs: OnboardingPreferences,
+        seenCardIds: Set<String>,
+        amenedCardIds: Set<String>,
+        savedCardIds: Set<String>,
+        seriesState: SessionSeriesState = SessionSeriesState(),
+        swipeCount: Int = 0,
+        seed: Long? = null
+    ): List<FeedCardItem> {
+        if (allCards.isEmpty()) return emptyList()
+        val random = if (seed != null) Random(seed) else Random.Default
+
+        // 1. 30-day exclusion (fallback to allCards if unseen pool runs out)
+        val nonDropped = allCards.filterNot { it.seriesId != null && it.seriesId in seriesState.droppedSeriesIds }
+        val activePool = if (nonDropped.isNotEmpty()) nonDropped else allCards
+        val unseen = activePool.filterNot { it.id in seenCardIds }
+        val pool = if (unseen.isNotEmpty()) unseen else activePool
+
+        val seriesTotals = allCards
+            .filter { !it.seriesId.isNullOrBlank() && it.seriesOrder != null }
+            .groupBy { it.seriesId!! }
+            .mapValues { (_, cardsInSeries) -> cardsInSeries.maxOf { it.seriesOrder ?: 1 } }
+
+        // 2. First 15 cards of a brand-new user: compare different formats on the same topic
+        val isBrandNewUser = swipeCount < AdaptiveRankerConfig.NEW_USER_INTERACTION_THRESHOLD &&
+            betaProfile.totalInteractionsCount() < AdaptiveRankerConfig.NEW_USER_INTERACTION_THRESHOLD
+        if (isBrandNewUser) {
+            return buildNewUserFormatComparisonFeed(
+                pool = pool,
+                userState = userState,
+                onboardingPrefs = onboardingPrefs,
+                seriesTotals = seriesTotals,
+                amenedCardIds = amenedCardIds,
+                savedCardIds = savedCardIds,
+                random = random
+            )
+        }
+
+        // 3. Score each card via mood belief + Thompson sampling + session mode + series bonus
+        val scoredPool = pool.map { card ->
+            card to scoreCard(card, userState, betaProfile, seriesState, random)
+        }.sortedByDescending { it.second }
+
+        // 4. Partition into Best Matches (70%), Adjacent (20%), Wildcards (10%), adjusting for confidence
+        val topTopic = betaProfile.topValue(BetaDimension.TOPIC)
+            ?: onboardingPrefs.goal.lowercase()
+        val adjacentSet = ADJACENT_TOPICS[topTopic.lowercase()] ?: emptySet()
+
+        val totalCount = scoredPool.size
+        val (bestShare, adjacentShare, wildcardShare) = computeMixRatios(userState.confidence)
+
+        val wildcardCandidates = scoredPool.filter { (card, _) ->
+            isWildcard(card, betaProfile, topTopic, adjacentSet)
+        }.map { it.first }.toMutableList()
+
+        val adjacentCandidates = scoredPool.filter { (card, _) ->
+            card !in wildcardCandidates &&
+                card.topics.any { it.lowercase() in adjacentSet }
+        }.map { it.first }.toMutableList()
+
+        val bestCandidates = scoredPool.filter { (card, _) ->
+            card !in wildcardCandidates && card !in adjacentCandidates
+        }.map { it.first }.toMutableList()
+
+        // 5. Identify pending series continuations (dwellRatio > 0.8 on part N -> part N+1 in next 1..3 cards)
+        val pendingSeriesCards = seriesState.pendingNextParts.entries.mapNotNull { (sId, nextOrder) ->
+            pool.firstOrNull { it.seriesId == sId && it.seriesOrder == nextOrder }
+        }.toMutableList()
+
+        // Remove pending series cards from regular buckets so they aren't duplicated
+        bestCandidates.removeAll(pendingSeriesCards.toSet())
+        adjacentCandidates.removeAll(pendingSeriesCards.toSet())
+        wildcardCandidates.removeAll(pendingSeriesCards.toSet())
+
+        val rankedCards = mutableListOf<Card>()
+        val targetBestSteps = (10 * bestShare).roundToInt().coerceAtLeast(5)
+        val targetAdjacentSteps = (10 * adjacentShare).roundToInt().coerceAtLeast(1)
+
+        var step = 0
+        while (bestCandidates.isNotEmpty() || adjacentCandidates.isNotEmpty() ||
+            wildcardCandidates.isNotEmpty() || pendingSeriesCards.isNotEmpty()
+        ) {
+            // Insert pending series continuation within the first 1..3 cards (or as soon as valid)
+            if (pendingSeriesCards.isNotEmpty() && rankedCards.size in 0 until AdaptiveRankerConfig.SERIES_INSERT_WINDOW_MAX) {
+                val seriesCandidate = pickValidWithRelaxation(pendingSeriesCards, rankedCards)
+                if (seriesCandidate != null) {
+                    rankedCards.add(seriesCandidate)
+                    step++
+                    continue
+                }
+            }
+
+            val cyclePos = step % 10
+            val candidate = when {
+                cyclePos < targetBestSteps -> {
+                    pickValid(bestCandidates, rankedCards)
+                        ?: pickValid(adjacentCandidates, rankedCards)
+                        ?: pickValid(wildcardCandidates, rankedCards)
+                }
+                cyclePos < targetBestSteps + targetAdjacentSteps -> {
+                    pickValid(adjacentCandidates, rankedCards)
+                        ?: pickValid(bestCandidates, rankedCards)
+                        ?: pickValid(wildcardCandidates, rankedCards)
+                }
+                else -> {
+                    pickValid(wildcardCandidates, rankedCards)
+                        ?: pickValid(adjacentCandidates, rankedCards)
+                        ?: pickValid(bestCandidates, rankedCards)
+                }
+            }
+
+            if (candidate != null) {
+                rankedCards.add(candidate)
+            } else {
+                // Relaxed fallback while still respecting format/book fatigue if possible
+                val fallback = pickValidWithRelaxation(bestCandidates, rankedCards)
+                    ?: pickValidWithRelaxation(adjacentCandidates, rankedCards)
+                    ?: pickValidWithRelaxation(wildcardCandidates, rankedCards)
+                    ?: pickValidWithRelaxation(pendingSeriesCards, rankedCards)
+                if (fallback != null) {
+                    rankedCards.add(fallback)
+                } else {
+                    break
+                }
+            }
+            step++
+        }
+
+        val mapped = rankedCards.map { card ->
+            FeedCardItem(
+                card = card,
+                isAmened = card.id in amenedCardIds,
+                isSaved = card.id in savedCardIds,
+                seriesTotalCount = card.seriesId?.let { seriesTotals[it] },
+                recommendationReason = buildReason(card, userState, topTopic, seriesState)
+            )
+        }
+
+        return insertPauseCards(mapped)
+    }
+
+    internal fun computeMixRatios(confidence: Float): Triple<Float, Float, Float> {
+        // Confidence in [0, 1]. Low confidence raises exploration while keeping wildcard >= 10%.
+        val clampedConf = confidence.coerceIn(0f, 1f)
+        val extraExploration = if (clampedConf < 0.5f) {
+            ((0.5f - clampedConf) / 0.5f) * 0.20f
+        } else {
+            0f
+        }
+        val wildcard = (AdaptiveRankerConfig.BASE_WILDCARD_RATIO + extraExploration * 0.5f)
+            .coerceAtLeast(AdaptiveRankerConfig.MIN_WILDCARD_RATIO)
+        val adjacent = AdaptiveRankerConfig.BASE_ADJACENT_RATIO + extraExploration * 0.5f
+        val best = (1f - wildcard - adjacent).coerceAtLeast(0.50f)
+        return Triple(best, adjacent, wildcard)
+    }
+
+    internal fun scoreCard(
+        card: Card,
+        userState: UserStateEstimate,
+        betaProfile: LongTermBetaProfile,
+        seriesState: SessionSeriesState,
+        random: Random
+    ): Float {
+        // 1. Mood belief match
+        val moodScore = if (card.moods.isEmpty()) {
+            0f
+        } else {
+            card.moods.maxOf { mood ->
+                userState.moodBelief[mood.lowercase().trim()] ?: 0f
+            }
+        }
+
+        // 2. Topic & tone Thompson sampling / affinity
+        val topicSample = if (card.topics.isEmpty()) {
+            0.5f
+        } else {
+            card.topics.maxOf { topic ->
+                betaProfile.sample(BetaDimension.TOPIC, topic, random)
+            }
+        }
+        val toneAffinity = betaProfile.mean(BetaDimension.TONE, card.tone)
+
+        // 3. Format fit for session mode + Thompson sampling on format
+        val formatSample = betaProfile.sample(BetaDimension.FORMAT, card.format, random)
+        val sessionFormatFit = computeSessionFormatFit(card.format, userState.sessionMode)
+
+        // 4. Length fit (session mode + late night + Beta affinity)
+        val lengthAffinity = betaProfile.mean(BetaDimension.LENGTH, card.length)
+        val sessionLengthFit = computeSessionLengthFit(card.length, userState.sessionMode, userState.isLateNight)
+
+        // 5. Series continuation bonus
+        val seriesBonus = if (card.seriesId != null &&
+            seriesState.pendingNextParts[card.seriesId] == card.seriesOrder
+        ) {
+            AdaptiveRankerConfig.WEIGHT_SERIES_CONTINUATION
+        } else {
+            0f
+        }
+
+        return (moodScore * AdaptiveRankerConfig.WEIGHT_MOOD_MATCH) +
+            (topicSample * AdaptiveRankerConfig.WEIGHT_TOPIC_THOMPSON) +
+            (toneAffinity * AdaptiveRankerConfig.WEIGHT_TONE_AFFINITY) +
+            (formatSample * AdaptiveRankerConfig.WEIGHT_FORMAT_THOMPSON) +
+            (sessionFormatFit * AdaptiveRankerConfig.WEIGHT_SESSION_FORMAT_FIT) +
+            ((lengthAffinity + sessionLengthFit) * 0.5f * AdaptiveRankerConfig.WEIGHT_LENGTH_FIT) +
+            seriesBonus
+    }
+
+    private fun computeSessionFormatFit(format: String, mode: SessionMode): Float {
+        val f = format.lowercase().trim()
+        return when (mode) {
+            SessionMode.SKIMMING -> when (f) {
+                "verse" -> 1.0f
+                "question" -> 0.7f
+                "didyouknow" -> 0.5f
+                "story" -> 0.2f
+                else -> 0.5f
+            }
+            SessionMode.READING -> when (f) {
+                "verse" -> 0.8f
+                "didyouknow" -> 0.8f
+                "question" -> 0.75f
+                "story" -> 0.7f
+                else -> 0.7f
+            }
+            SessionMode.DEEP -> when (f) {
+                "story" -> 1.0f
+                "didyouknow" -> 0.9f
+                "question" -> 0.85f
+                "verse" -> 0.5f
+                else -> 0.7f
+            }
+        }
+    }
+
+    private fun computeSessionLengthFit(length: String, mode: SessionMode, isLateNight: Boolean): Float {
+        val l = length.lowercase().trim()
+        val base = when (mode) {
+            SessionMode.SKIMMING -> when (l) {
+                "short" -> 1.0f
+                "medium" -> 0.5f
+                else -> 0.15f
+            }
+            SessionMode.READING -> when (l) {
+                "medium" -> 0.9f
+                "short" -> 0.8f
+                else -> 0.6f
+            }
+            SessionMode.DEEP -> when (l) {
+                "long" -> 1.0f
+                "medium" -> 0.85f
+                else -> 0.4f
+            }
+        }
+        return if (isLateNight && l == "long") base * 0.8f else base
+    }
+
+    private fun isWildcard(
+        card: Card,
+        betaProfile: LongTermBetaProfile,
+        topTopic: String,
+        adjacentSet: Set<String>
+    ): Boolean {
+        val isNewFormat = !betaProfile.hasSeenDimensionValue(BetaDimension.FORMAT, card.format)
+        val isNewTopic = card.topics.any { !betaProfile.hasSeenDimensionValue(BetaDimension.TOPIC, it) }
+        val isOutsideCoreTopics = card.topics.none {
+            it.equals(topTopic, ignoreCase = true) || it.lowercase() in adjacentSet
+        }
+        return isNewFormat || isNewTopic || isOutsideCoreTopics
+    }
+
+    private fun buildNewUserFormatComparisonFeed(
+        pool: List<Card>,
+        userState: UserStateEstimate,
+        onboardingPrefs: OnboardingPreferences,
+        seriesTotals: Map<String, Int>,
+        amenedCardIds: Set<String>,
+        savedCardIds: Set<String>,
+        random: Random
+    ): List<FeedCardItem> {
+        // Choose a single focus topic for the first 15 cards so formats can be compared cleanly
+        val dominantMood = userState.moodBelief.maxByOrNull { it.value }?.key
+        val focusTopic = pool
+            .filter { card -> dominantMood != null && card.moods.any { it.equals(dominantMood, ignoreCase = true) } }
+            .flatMap { it.topics }
+            .groupingBy { it.lowercase() }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+            ?: onboardingPrefs.goal.lowercase()
+
+        val topicCards = pool.filter { card ->
+            card.topics.any { it.equals(focusTopic, ignoreCase = true) }
+        }.shuffled(random).toMutableList()
+
+        val remainingPool = pool.filterNot { it in topicCards }.shuffled(random).toMutableList()
+
+        val result = mutableListOf<Card>()
+        val targetFormats = listOf("verse", "story", "didyouknow", "question")
+        var formatCursor = 0
+
+        while (result.size < AdaptiveRankerConfig.NEW_USER_INTERACTION_THRESHOLD &&
+            (topicCards.isNotEmpty() || remainingPool.isNotEmpty())
+        ) {
+            val desiredFormat = targetFormats[formatCursor % targetFormats.size]
+            formatCursor++
+
+            val picked = pickMatchingFormat(topicCards, desiredFormat, result)
+                ?: pickValid(topicCards, result)
+                ?: pickMatchingFormat(remainingPool, desiredFormat, result)
+                ?: pickValid(remainingPool, result)
+                ?: pickValidWithRelaxation(topicCards, result)
+                ?: pickValidWithRelaxation(remainingPool, result)
+                ?: break
+
+            result.add(picked)
+        }
+
+        // Append the rest of the pool respecting fatigue rules
+        while (topicCards.isNotEmpty() || remainingPool.isNotEmpty()) {
+            val next = pickValid(topicCards, result)
+                ?: pickValid(remainingPool, result)
+                ?: pickValidWithRelaxation(topicCards, result)
+                ?: pickValidWithRelaxation(remainingPool, result)
+                ?: break
+            result.add(next)
+        }
+
+        val mapped = result.mapIndexed { index, card ->
+            FeedCardItem(
+                card = card,
+                isAmened = card.id in amenedCardIds,
+                isSaved = card.id in savedCardIds,
+                seriesTotalCount = card.seriesId?.let { seriesTotals[it] },
+                recommendationReason = if (index < AdaptiveRankerConfig.NEW_USER_INTERACTION_THRESHOLD) {
+                    "Exploring ${card.format.lowercase()} on $focusTopic"
+                } else {
+                    buildReason(card, userState, focusTopic, SessionSeriesState())
+                }
+            )
+        }
+        return insertPauseCards(mapped)
+    }
+
+    private fun pickMatchingFormat(
+        pool: MutableList<Card>,
+        desiredFormat: String,
+        current: List<Card>
+    ): Card? {
+        val idx = pool.indexOfFirst {
+            it.format.equals(desiredFormat, ignoreCase = true) && satisfiesFatigue(it, current)
+        }
+        return if (idx != -1) pool.removeAt(idx) else null
+    }
+
+    private fun pickValid(pool: MutableList<Card>, current: List<Card>): Card? {
+        val last = current.lastOrNull()
+        val lastFormat = last?.format
+        val lastTopic = last?.topics?.firstOrNull()
+
+        // Prefer variety on immediate transition while strictly enforcing fatigue limits
+        val p1 = pool.indexOfFirst { card ->
+            satisfiesFatigue(card, current) &&
+                (lastFormat == null || !card.format.equals(lastFormat, ignoreCase = true)) &&
+                (lastTopic == null || card.topics.none { it.equals(lastTopic, ignoreCase = true) })
+        }
+        if (p1 != -1) return pool.removeAt(p1)
+
+        val p2 = pool.indexOfFirst { satisfiesFatigue(it, current) }
+        if (p2 != -1) return pool.removeAt(p2)
+
+        return null
+    }
+
+    private fun pickValidWithRelaxation(pool: MutableList<Card>, current: List<Card>): Card? {
+        if (pool.isEmpty()) return null
+        val formatAndBookOk = pool.indexOfFirst { satisfiesFormatAndBookFatigue(it, current) }
+        if (formatAndBookOk != -1) return pool.removeAt(formatAndBookOk)
+
+        val formatOnlyOk = pool.indexOfFirst { card ->
+            current.size < 3 || current.takeLast(3).count { it.format.equals(card.format, ignoreCase = true) } < 3
+        }
+        if (formatOnlyOk != -1) return pool.removeAt(formatOnlyOk)
+
+        return pool.removeAt(0)
+    }
+
+    internal fun satisfiesFatigue(candidate: Card, current: List<Card>): Boolean {
+        if (!satisfiesFormatAndBookFatigue(candidate, current)) return false
+        if (current.size >= 3) {
+            val last3 = current.takeLast(3)
+            val candidateTopic = candidate.topics.firstOrNull()?.lowercase()
+            if (candidateTopic != null) {
+                val sameTopic = last3.count { it.topics.firstOrNull()?.lowercase() == candidateTopic }
+                if (sameTopic >= 3) return false
+            }
+        }
+        return true
+    }
+
+    private fun satisfiesFormatAndBookFatigue(candidate: Card, current: List<Card>): Boolean {
+        if (current.size >= 3) {
+            val last3 = current.takeLast(3)
+            val sameFormat = last3.count { it.format.equals(candidate.format, ignoreCase = true) }
+            if (sameFormat >= 3) return false
+        }
+        if (current.size >= 2 && candidate.book.isNotBlank()) {
+            val last2 = current.takeLast(2)
+            val sameBook = last2.count { it.book.equals(candidate.book, ignoreCase = true) }
+            if (sameBook >= 2) return false
+        }
+        return true
+    }
+
+    private fun buildReason(
+        card: Card,
+        userState: UserStateEstimate,
+        topTopic: String,
+        seriesState: SessionSeriesState
+    ): String {
+        val dominantMood = userState.moodBelief.maxByOrNull { it.value }?.key
+        return when {
+            card.seriesId != null && seriesState.pendingNextParts[card.seriesId] == card.seriesOrder ->
+                "Continuing Part ${card.seriesOrder} of the story"
+            dominantMood != null && card.moods.any { it.equals(dominantMood, ignoreCase = true) } ->
+                "Encouragement for when you feel $dominantMood"
+            card.topics.any { it.equals(topTopic, ignoreCase = true) } ->
+                "Because you resonated with passages on $topTopic"
+            card.format.equals("story", ignoreCase = true) ->
+                "A narrative from Scripture"
+            card.format.equals("didyouknow", ignoreCase = true) ->
+                "Historical context behind the verse"
+            card.format.equals("question", ignoreCase = true) ->
+                "A reflective question for your day"
+            else -> "Picked for your quiet reading"
+        }
+    }
+
+    internal fun insertPauseCards(items: List<FeedCardItem>): List<FeedCardItem> {
+        val feedWithPauses = mutableListOf<FeedCardItem>()
+        items.forEachIndexed { index, item ->
+            feedWithPauses.add(item)
+            if ((index + 1) % AdaptiveRankerConfig.PAUSE_CARD_INTERVAL == 0 && index + 1 < items.size) {
+                feedWithPauses.add(FeedCardItem.createPauseCard(index + 1, item.card))
+            }
+        }
+        return feedWithPauses
+    }
+}

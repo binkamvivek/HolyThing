@@ -1,16 +1,23 @@
 package com.holything.app.core.signal
 
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
+import com.holything.app.data.local.room.dao.BetaProfileDao
 import com.holything.app.data.local.room.dao.SignalDao
+import com.holything.app.data.local.room.entity.BetaAffinityEntity
 import com.holything.app.data.local.room.entity.SessionSummaryEntity
 import com.holything.app.data.local.room.entity.SignalEventEntity
 import com.holything.app.domain.model.Card
+import com.holything.app.domain.ranking.BetaDimension
+import com.holything.app.domain.ranking.SessionSeriesState
 import com.holything.app.domain.signal.SignalScoreCalculator
 import com.holything.app.domain.signal.SignalScoringConfig
 import com.holything.app.domain.state.UserStateEstimator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -27,6 +34,7 @@ import javax.inject.Singleton
 @Singleton
 class SignalCaptureManager @Inject constructor(
     private val signalDao: SignalDao,
+    private val betaProfileDao: BetaProfileDao,
     private val dataStore: UserPreferencesDataStore,
     private val userStateEstimator: UserStateEstimator
 ) {
@@ -74,6 +82,9 @@ class SignalCaptureManager @Inject constructor(
     private var totalDwellRatioSum: Float = 0f
     private var recordedEventCount: Int = 0
     private var sessionInitialized: Boolean = false
+
+    private val _seriesState = MutableStateFlow(SessionSeriesState())
+    val seriesState: StateFlow<SessionSeriesState> = _seriesState.asStateFlow()
 
     private suspend fun ensureSessionInitializedLocked(nowMs: Long) {
         if (sessionInitialized) return
@@ -257,6 +268,59 @@ class SignalCaptureManager @Inject constructor(
             cardMoods = session.card.moods,
             nowMs = endTimeMs
         )
+
+        // Update session story series state
+        val sId = session.card.seriesId
+        val sOrder = session.card.seriesOrder
+        if (!sId.isNullOrBlank() && sOrder != null) {
+            val currentSeries = _seriesState.value
+            if (isFastSkip) {
+                _seriesState.value = currentSeries.copy(
+                    pendingNextParts = currentSeries.pendingNextParts - sId,
+                    droppedSeriesIds = currentSeries.droppedSeriesIds + sId
+                )
+            } else if (dwellRatio > 0.8f && sId !in currentSeries.droppedSeriesIds) {
+                _seriesState.value = currentSeries.copy(
+                    pendingNextParts = currentSeries.pendingNextParts + (sId to (sOrder + 1))
+                )
+            }
+        }
+
+        // Update Beta distributions in Room on background IO thread
+        if (engagementScore != 0f) {
+            val cardCopy = session.card
+            scope.launch {
+                updateBetaAffinities(cardCopy, engagementScore, endTimeMs)
+            }
+        }
+    }
+
+    private suspend fun updateBetaAffinities(card: Card, engagementScore: Float, nowMs: Long) {
+        val posDelta = if (engagementScore > 0f) engagementScore else 0f
+        val negDelta = if (engagementScore < 0f) -engagementScore else 0f
+
+        val pairs = buildList {
+            card.topics.forEach { add(BetaDimension.TOPIC to it.lowercase().trim()) }
+            add(BetaDimension.FORMAT to card.format.lowercase().trim())
+            add(BetaDimension.TONE to card.tone.lowercase().trim())
+            add(BetaDimension.LENGTH to card.length.lowercase().trim())
+        }.filter { it.second.isNotBlank() }.distinct()
+
+        val updatedEntities = pairs.map { (dim, value) ->
+            val existing = betaProfileDao.getAffinity(dim, value)
+            val prevAlpha = existing?.alpha ?: 1f
+            val prevBeta = existing?.beta ?: 1f
+            BetaAffinityEntity(
+                dimension = dim,
+                value = value,
+                alpha = (prevAlpha + posDelta).coerceAtLeast(1f),
+                beta = (prevBeta + negDelta).coerceAtLeast(1f),
+                updatedAt = nowMs
+            )
+        }
+        if (updatedEntities.isNotEmpty()) {
+            betaProfileDao.upsertAffinities(updatedEntities)
+        }
     }
 
     private suspend fun flushIfBatchReadyLocked(now: Long) {

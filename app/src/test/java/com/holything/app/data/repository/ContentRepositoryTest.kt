@@ -30,6 +30,8 @@ class ContentRepositoryTest {
     private val savedCardDao: SavedCardDao = mockk(relaxed = true)
     private val journalNoteDao: com.holything.app.data.local.room.dao.JournalNoteDao = mockk(relaxed = true)
     private val readingDayDao: com.holything.app.data.local.room.dao.ReadingDayDao = mockk(relaxed = true)
+    private val betaProfileDao: com.holything.app.data.local.room.dao.BetaProfileDao = mockk(relaxed = true)
+    private val userStateEstimator = com.holything.app.domain.state.UserStateEstimator()
     private val dataStore: UserPreferencesDataStore = mockk(relaxed = true)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -45,6 +47,8 @@ class ContentRepositoryTest {
             savedCardDao = savedCardDao,
             journalNoteDao = journalNoteDao,
             readingDayDao = readingDayDao,
+            betaProfileDao = betaProfileDao,
+            userStateEstimator = userStateEstimator,
             dataStore = dataStore,
             json = json
         )
