@@ -46,9 +46,9 @@ fun ReflectBottomSheet(
     onDismiss: (draftNote: String) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var noteText by remember(card.id) { mutableStateOf(initialNote) }
+    var noteText by remember(card.id, initialNote) { mutableStateOf(initialNote) }
 
-    LaunchedEffect(initialNote) {
+    LaunchedEffect(card.id, initialNote) {
         if (noteText.isBlank() && initialNote.isNotBlank()) {
             noteText = initialNote
         }

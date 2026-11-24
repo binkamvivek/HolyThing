@@ -44,6 +44,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,8 +69,16 @@ fun SavedScreen(
     viewModel: SavedViewModel
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val activeJournalNote by viewModel.activeJournalNote.collectAsState()
     var activeReflectCard by remember { mutableStateOf<Card?>(null) }
     var activeShareCard by remember { mutableStateOf<Card?>(null) }
+
+    LaunchedEffect(activeReflectCard?.id) {
+        val cardId = activeReflectCard?.id
+        if (cardId != null) {
+            viewModel.loadJournalNote(cardId)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -245,8 +254,19 @@ fun SavedScreen(
     activeReflectCard?.let { card ->
         ReflectBottomSheet(
             card = card,
-            onPrayed = { activeReflectCard = null },
-            onDismiss = { activeReflectCard = null }
+            initialNote = activeJournalNote,
+            onPrayed = { noteText ->
+                viewModel.onPrayed(card.id, noteText)
+                viewModel.clearActiveJournalNote()
+                activeReflectCard = null
+            },
+            onDismiss = { draftText ->
+                if (draftText.isNotBlank()) {
+                    viewModel.saveJournalDraft(card.id, draftText)
+                }
+                viewModel.clearActiveJournalNote()
+                activeReflectCard = null
+            }
         )
     }
 

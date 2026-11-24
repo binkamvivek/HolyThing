@@ -271,6 +271,10 @@ class FeedViewModel @Inject constructor(
         }
     }
 
+    fun clearActiveJournalNote() {
+        _activeJournalNote.value = ""
+    }
+
     fun dismissSupportBanner() {
         viewModelScope.launch {
             dataStore.markSupportMessageShown()

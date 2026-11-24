@@ -181,12 +181,13 @@ class ContentRepository @Inject constructor(
     }
 
     suspend fun saveJournalNote(cardId: String, text: String) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
         val existing = journalNoteDao.getLatestNoteForCard(cardId)
         if (existing != null) {
             journalNoteDao.upsertNote(
                 existing.copy(
                     noteText = text,
-                    updatedAt = System.currentTimeMillis()
+                    updatedAt = now
                 )
             )
         } else {
@@ -194,8 +195,8 @@ class ContentRepository @Inject constructor(
                 JournalNoteEntity(
                     cardId = cardId,
                     noteText = text,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis()
+                    createdAt = now,
+                    updatedAt = now
                 )
             )
         }

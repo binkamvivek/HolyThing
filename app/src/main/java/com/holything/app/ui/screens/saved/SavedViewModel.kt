@@ -8,6 +8,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -27,6 +28,9 @@ class SavedViewModel @Inject constructor(
 
     private val _searchQuery = MutableStateFlow("")
     private val _isGridView = MutableStateFlow(false)
+
+    private val _activeJournalNote = MutableStateFlow("")
+    val activeJournalNote: StateFlow<String> = _activeJournalNote.asStateFlow()
 
     val uiState: StateFlow<SavedUiState> = combine(
         repository.getSavedCards(),
@@ -70,5 +74,34 @@ class SavedViewModel @Inject constructor(
         viewModelScope.launch {
             repository.toggleSave(cardId)
         }
+    }
+
+    fun loadJournalNote(cardId: String) {
+        viewModelScope.launch {
+            val note = repository.getLatestJournalNote(cardId)
+            _activeJournalNote.value = note?.noteText ?: ""
+        }
+    }
+
+    fun onPrayed(cardId: String, noteText: String) {
+        viewModelScope.launch {
+            if (noteText.isNotBlank()) {
+                repository.saveJournalNote(cardId, noteText.trim())
+                _activeJournalNote.value = noteText.trim()
+            }
+            repository.recordInteraction(cardId = cardId, type = "prayed", dwellMs = 0)
+        }
+    }
+
+    fun saveJournalDraft(cardId: String, noteText: String) {
+        if (noteText.isBlank()) return
+        viewModelScope.launch {
+            repository.saveJournalNote(cardId, noteText.trim())
+            _activeJournalNote.value = noteText.trim()
+        }
+    }
+
+    fun clearActiveJournalNote() {
+        _activeJournalNote.value = ""
     }
 }

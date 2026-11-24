@@ -294,12 +294,14 @@ fun FeedScreen(
             initialNote = activeJournalNote,
             onPrayed = { noteText ->
                 viewModel.onPrayed(card.id, noteText)
+                viewModel.clearActiveJournalNote()
                 activeReflectCard = null
             },
             onDismiss = { draftText ->
                 if (draftText.isNotBlank()) {
                     viewModel.saveJournalDraft(card.id, draftText)
                 }
+                viewModel.clearActiveJournalNote()
                 activeReflectCard = null
             }
         )

@@ -12,10 +12,10 @@ interface JournalNoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertNote(note: JournalNoteEntity): Long
 
-    @Query("SELECT * FROM journal_notes WHERE cardId = :cardId ORDER BY createdAt DESC LIMIT 1")
+    @Query("SELECT * FROM journal_notes WHERE cardId = :cardId ORDER BY updatedAt DESC, createdAt DESC LIMIT 1")
     fun getNoteForCard(cardId: String): Flow<JournalNoteEntity?>
 
-    @Query("SELECT * FROM journal_notes WHERE cardId = :cardId ORDER BY createdAt DESC LIMIT 1")
+    @Query("SELECT * FROM journal_notes WHERE cardId = :cardId ORDER BY updatedAt DESC, createdAt DESC LIMIT 1")
     suspend fun getLatestNoteForCard(cardId: String): JournalNoteEntity?
 
     @Query("SELECT * FROM journal_notes WHERE cardId = :cardId ORDER BY createdAt DESC")
