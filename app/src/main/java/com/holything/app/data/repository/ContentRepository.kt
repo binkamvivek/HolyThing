@@ -181,14 +181,28 @@ class ContentRepository @Inject constructor(
     }
 
     suspend fun saveJournalNote(cardId: String, text: String) = withContext(Dispatchers.IO) {
-        journalNoteDao.upsertNote(
-            JournalNoteEntity(
-                cardId = cardId,
-                noteText = text,
-                updatedAt = System.currentTimeMillis()
+        val existing = journalNoteDao.getLatestNoteForCard(cardId)
+        if (existing != null) {
+            journalNoteDao.upsertNote(
+                existing.copy(
+                    noteText = text,
+                    updatedAt = System.currentTimeMillis()
+                )
             )
-        )
-        recordInteraction(cardId = cardId, type = "prayed", dwellMs = 0)
+        } else {
+            journalNoteDao.upsertNote(
+                JournalNoteEntity(
+                    cardId = cardId,
+                    noteText = text,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    suspend fun getLatestJournalNote(cardId: String): JournalNoteEntity? = withContext(Dispatchers.IO) {
+        journalNoteDao.getLatestNoteForCard(cardId)
     }
 
     fun getJournalNote(cardId: String): Flow<JournalNoteEntity?> =

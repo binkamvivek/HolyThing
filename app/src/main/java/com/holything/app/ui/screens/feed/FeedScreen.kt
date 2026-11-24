@@ -56,6 +56,7 @@ fun FeedScreen(
     onBack: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val activeJournalNote by viewModel.activeJournalNote.collectAsState()
     val context = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -280,14 +281,27 @@ fun FeedScreen(
     }
 
     // Modal Reflection Sheet
+    LaunchedEffect(activeReflectCard?.id) {
+        val cardId = activeReflectCard?.id
+        if (cardId != null) {
+            viewModel.loadJournalNote(cardId)
+        }
+    }
+
     activeReflectCard?.let { card ->
         ReflectBottomSheet(
             card = card,
+            initialNote = activeJournalNote,
             onPrayed = { noteText ->
                 viewModel.onPrayed(card.id, noteText)
                 activeReflectCard = null
             },
-            onDismiss = { activeReflectCard = null }
+            onDismiss = { draftText ->
+                if (draftText.isNotBlank()) {
+                    viewModel.saveJournalDraft(card.id, draftText)
+                }
+                activeReflectCard = null
+            }
         )
     }
 

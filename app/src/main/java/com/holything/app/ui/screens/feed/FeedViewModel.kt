@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
@@ -53,6 +54,9 @@ class FeedViewModel @Inject constructor(
 
     private val _targetScrollCardId = MutableStateFlow<String?>(null)
     val targetScrollCardId: StateFlow<String?> = _targetScrollCardId
+
+    private val _activeJournalNote = MutableStateFlow<String>("")
+    val activeJournalNote: StateFlow<String> = _activeJournalNote.asStateFlow()
 
     private var currentPageIndex = 0
     private var pageStartTime = System.currentTimeMillis()
@@ -234,16 +238,36 @@ class FeedViewModel @Inject constructor(
         }
     }
 
+    fun loadJournalNote(cardId: String) {
+        viewModelScope.launch {
+            val note = repository.getLatestJournalNote(cardId)
+            _activeJournalNote.value = note?.noteText ?: ""
+        }
+    }
+
     fun onReflect(cardId: String) {
         viewModelScope.launch {
             repository.recordInteraction(cardId = cardId, type = "reflect", dwellMs = 0)
         }
+        loadJournalNote(cardId)
     }
 
     fun onPrayed(cardId: String, noteText: String) {
         viewModelScope.launch {
-            repository.saveJournalNote(cardId, noteText)
-            _userFeedbackEvent.emit("Saved to your private journal")
+            if (noteText.isNotBlank()) {
+                repository.saveJournalNote(cardId, noteText.trim())
+                _activeJournalNote.value = noteText.trim()
+                _userFeedbackEvent.emit("Saved to your private journal")
+            }
+            repository.recordInteraction(cardId = cardId, type = "prayed", dwellMs = 0)
+        }
+    }
+
+    fun saveJournalDraft(cardId: String, noteText: String) {
+        if (noteText.isBlank()) return
+        viewModelScope.launch {
+            repository.saveJournalNote(cardId, noteText.trim())
+            _activeJournalNote.value = noteText.trim()
         }
     }
 

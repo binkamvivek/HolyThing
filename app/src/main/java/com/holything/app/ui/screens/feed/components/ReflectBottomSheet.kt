@@ -23,6 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,13 +43,19 @@ fun ReflectBottomSheet(
     card: Card,
     initialNote: String = "",
     onPrayed: (noteText: String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: (draftNote: String) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var noteText by remember { mutableStateOf(initialNote) }
+    var noteText by remember(card.id) { mutableStateOf(initialNote) }
+
+    LaunchedEffect(initialNote) {
+        if (noteText.isBlank() && initialNote.isNotBlank()) {
+            noteText = initialNote
+        }
+    }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { onDismiss(noteText) },
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
