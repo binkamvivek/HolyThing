@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.holything.app.ui.theme.CardColors
 
 @Composable
 fun CardActionButtons(
@@ -51,12 +52,12 @@ fun CardActionButtons(
     )
 
     val heartColor by animateColorAsState(
-        targetValue = if (isAmened) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface,
+        targetValue = if (isAmened) Color(0xFFE53935) else CardColors.actionButtonIcon,
         label = "heartColor"
     )
 
     val bookmarkColor by animateColorAsState(
-        targetValue = if (isSaved) Color(0xFFF57F17) else MaterialTheme.colorScheme.onSurface,
+        targetValue = if (isSaved) Color(0xFFF57F17) else CardColors.actionButtonIcon,
         label = "bookmarkColor"
     )
 
@@ -73,7 +74,7 @@ fun CardActionButtons(
                 onClick = onAmenToggle,
                 modifier = Modifier
                     .size(48.dp)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
+                    .background(CardColors.actionButtonBackground, CircleShape)
             ) {
                 Icon(
                     imageVector = if (isAmened) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -88,7 +89,7 @@ fun CardActionButtons(
             Text(
                 text = "Amen",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = if (isAmened) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = if (isAmened) CardColors.actionButtonIcon else CardColors.actionButtonIcon.copy(alpha = 0.65f),
                 textAlign = TextAlign.Center
             )
         }
@@ -98,7 +99,7 @@ fun CardActionButtons(
             onClick = onSaveToggle,
             modifier = Modifier
                 .size(48.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
+                .background(CardColors.actionButtonBackground, CircleShape)
         ) {
             Icon(
                 imageVector = if (isSaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
@@ -113,12 +114,12 @@ fun CardActionButtons(
             onClick = onShare,
             modifier = Modifier
                 .size(48.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
+                .background(CardColors.actionButtonBackground, CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Filled.Share,
                 contentDescription = "Share Scripture",
-                tint = MaterialTheme.colorScheme.onSurface,
+                tint = CardColors.actionButtonIcon,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -128,12 +129,12 @@ fun CardActionButtons(
             onClick = onReflect,
             modifier = Modifier
                 .size(48.dp)
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f), CircleShape)
+                .background(CardColors.reflectButtonBackground, CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Filled.AutoAwesome,
                 contentDescription = "Pause and Reflect",
-                tint = MaterialTheme.colorScheme.primary,
+                tint = CardColors.reflectButtonIcon,
                 modifier = Modifier.size(22.dp)
             )
         }

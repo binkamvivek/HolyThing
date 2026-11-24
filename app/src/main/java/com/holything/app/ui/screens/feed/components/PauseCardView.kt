@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.holything.app.ui.theme.CardColors
 
 @Composable
 fun PauseCardView(
@@ -41,9 +42,9 @@ fun PauseCardView(
 ) {
     val backgroundBrush = Brush.verticalGradient(
         colors = listOf(
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            MaterialTheme.colorScheme.background,
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            Color(0xFF161B22),
+            Color(0xFF131517),
+            Color(0xFF14181E)
         )
     )
 
@@ -61,14 +62,14 @@ fun PauseCardView(
         ) {
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                color = CardColors.badgeBackground,
                 modifier = Modifier.size(72.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Spa,
                         contentDescription = "Pause and reflect",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        tint = CardColors.reference,
                         modifier = Modifier.size(36.dp)
                     )
                 }
@@ -82,7 +83,7 @@ fun PauseCardView(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Medium
                 ),
-                color = MaterialTheme.colorScheme.onBackground,
+                color = CardColors.hook,
                 textAlign = TextAlign.Center
             )
 
@@ -91,7 +92,7 @@ fun PauseCardView(
             Text(
                 text = "Want to pause and pray on one?",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = CardColors.insight,
                 textAlign = TextAlign.Center,
                 lineHeight = 24.sp
             )
@@ -103,8 +104,8 @@ fun PauseCardView(
                 onClick = onReflect,
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = CardColors.pillBackground,
+                    contentColor = CardColors.pillText
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -122,6 +123,9 @@ fun PauseCardView(
             OutlinedButton(
                 onClick = onKeepGoing,
                 shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = CardColors.verse
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
@@ -129,7 +133,7 @@ fun PauseCardView(
                 Text(
                     text = "Keep going",
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = CardColors.verse
                 )
             }
         }

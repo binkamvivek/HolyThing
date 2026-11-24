@@ -1,15 +1,19 @@
 package com.holything.app.ui.screens.feed
 
+import android.app.Activity
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -28,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,10 +42,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.launch
 import com.holything.app.ui.screens.feed.components.PauseCardView
 import com.holything.app.ui.screens.feed.components.ShareVerseSheet
@@ -49,6 +57,7 @@ import com.holything.app.ui.screens.feed.components.MoodRecheckDialog
 import com.holything.app.ui.screens.feed.components.ReflectBottomSheet
 import com.holything.app.ui.screens.feed.components.SupportBanner
 import com.holything.app.ui.screens.feed.components.WhyThisCardDialog
+import com.holything.app.ui.theme.CardColors
 
 @Composable
 fun FeedScreen(
@@ -72,14 +81,41 @@ fun FeedScreen(
         }
     }
 
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.context as? Activity)?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, view)
+            val originalStatusBarLight = insetsController.isAppearanceLightStatusBars
+            val originalNavBarLight = insetsController.isAppearanceLightNavigationBars
+
+            // Full-screen card view: status bar and navigation bar icons must be light on dark gradients
+            insetsController.isAppearanceLightStatusBars = false
+            insetsController.isAppearanceLightNavigationBars = false
+
+            onDispose {
+                insetsController.isAppearanceLightStatusBars = originalStatusBarLight
+                insetsController.isAppearanceLightNavigationBars = originalNavBarLight
+            }
+        } else {
+            onDispose {}
+        }
+    }
+
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { innerPadding ->
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.navigationBarsPadding()
+            )
+        },
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { _ ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
+                .background(Color(0xFF131517))
         ) {
             when {
                 // 1. Loading State
@@ -243,6 +279,7 @@ fun FeedScreen(
                     onDismiss = { viewModel.dismissSupportBanner() },
                     modifier = Modifier
                         .align(Alignment.TopCenter)
+                        .statusBarsPadding()
                         .padding(top = if (uiState.isOffline) 40.dp else 12.dp)
                 )
             }
@@ -251,8 +288,9 @@ fun FeedScreen(
             if (onBack != null) {
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                    color = CardColors.backButtonBackground,
                     modifier = Modifier
+                        .statusBarsPadding()
                         .padding(start = 16.dp, top = 16.dp)
                         .size(42.dp)
                         .align(Alignment.TopStart)
@@ -261,7 +299,7 @@ fun FeedScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back to Home",
-                            tint = MaterialTheme.colorScheme.onSurface,
+                            tint = CardColors.backButtonIcon,
                             modifier = Modifier.size(20.dp)
                         )
                     }

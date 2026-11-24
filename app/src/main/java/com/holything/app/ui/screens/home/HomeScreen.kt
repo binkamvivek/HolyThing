@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import com.holything.app.domain.model.Card
 import com.holything.app.ui.screens.feed.FeedViewModel
 import com.holything.app.ui.screens.feed.components.CardBackgroundGradients
+import com.holything.app.ui.theme.CardColors
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -208,12 +209,12 @@ fun HomeScreen(
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                        color = CardColors.badgeBackground
                                     ) {
                                         Text(
                                             text = "${card.verseRef} (${card.translation})",
                                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                            color = MaterialTheme.colorScheme.primary,
+                                            color = CardColors.reference,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                         )
                                     }
@@ -226,7 +227,7 @@ fun HomeScreen(
                                             Icon(
                                                 imageVector = Icons.Default.Refresh,
                                                 contentDescription = "Change passage",
-                                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                                                tint = CardColors.reference.copy(alpha = 0.85f),
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }
@@ -234,7 +235,7 @@ fun HomeScreen(
                                         Icon(
                                             imageVector = Icons.Default.Spa,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                            tint = CardColors.reference.copy(alpha = 0.85f),
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -247,7 +248,7 @@ fun HomeScreen(
                                         style = MaterialTheme.typography.headlineMedium.copy(
                                             fontWeight = FontWeight.Bold
                                         ),
-                                        color = MaterialTheme.colorScheme.onBackground,
+                                        color = CardColors.hook,
                                         maxLines = 3,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -259,7 +260,7 @@ fun HomeScreen(
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontFamily = FontFamily.Serif
                                         ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = CardColors.verse,
                                         maxLines = 3,
                                         overflow = TextOverflow.Ellipsis,
                                         lineHeight = 20.sp
@@ -269,7 +270,7 @@ fun HomeScreen(
                                 // Bottom Invitation Pill
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = CardColors.pillBackground,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
@@ -285,13 +286,13 @@ fun HomeScreen(
                                         Text(
                                             text = "Tap to read & scroll",
                                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onPrimary
+                                            color = CardColors.pillText
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Icon(
                                             imageVector = Icons.Default.North,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            tint = CardColors.pillText,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }

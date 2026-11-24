@@ -24,3 +24,22 @@ val SurfaceVariantDark = Color(0xFF262A2E)
 val TextCreamDark = Color(0xFFEDE9E3)
 val TextMutedDark = Color(0xFFA2A6AC)
 
+// Fixed card colors for dark gradient cards in BOTH light and dark theme
+object CardColors {
+    val hook = Color(0xFFFFFFFF)
+    val verse = Color(0xFFFAF8F5)
+    val reference = Color(0xFFA3B8A5) // Soft sage accent
+    val insight = Color(0xFFEDE9E3)
+    val insightBackground = Color(0xFF1E2226).copy(alpha = 0.55f)
+    val recommendationReason = Color(0xFFA2A6AC) // "Selected for you" label
+    val badgeBackground = Color(0xFF1E2226).copy(alpha = 0.7f)
+    val actionButtonBackground = Color(0xFF14171A).copy(alpha = 0.65f) // Dark translucent circle
+    val actionButtonIcon = Color(0xFFFFFFFF)
+    val reflectButtonBackground = Color(0xFF202A36).copy(alpha = 0.75f)
+    val reflectButtonIcon = Color(0xFF9FB6CD)
+    val backButtonBackground = Color(0xFF14171A).copy(alpha = 0.65f)
+    val backButtonIcon = Color(0xFFFFFFFF)
+    val pillBackground = Color(0xFF9FB6CD)
+    val pillText = Color(0xFF131517)
+}
+

@@ -80,7 +80,11 @@ fun HolyThingNavHost(
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier = if (currentRoute == Screen.FeedPager.route) {
+                Modifier
+            } else {
+                Modifier.padding(innerPadding)
+            }
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(

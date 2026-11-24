@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.holything.app.domain.model.FeedCardItem
+import com.holything.app.ui.theme.CardColors
 import kotlinx.coroutines.delay
 
 @Composable
@@ -149,7 +150,7 @@ fun FeedCardView(
             Text(
                 text = card.hook,
                 style = MaterialTheme.typography.displayMedium,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = CardColors.hook,
                 modifier = Modifier.semantics { traversalIndex = 1f }
             )
 
@@ -167,7 +168,7 @@ fun FeedCardView(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     ),
-                    color = MaterialTheme.colorScheme.secondary
+                    color = CardColors.reference
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -175,7 +176,7 @@ fun FeedCardView(
                 Text(
                     text = "“${card.verseText}”",
                     style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = CardColors.verse
                 )
             }
 
@@ -185,7 +186,7 @@ fun FeedCardView(
             if (card.insight.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                    color = CardColors.insightBackground,
                     tonalElevation = 1.dp,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -195,7 +196,7 @@ fun FeedCardView(
                     Text(
                         text = card.insight,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = CardColors.insight,
                         modifier = Modifier.padding(14.dp)
                     )
                 }
@@ -229,14 +230,14 @@ fun FeedCardView(
             Icon(
                 imageVector = Icons.Filled.Info,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                tint = CardColors.recommendationReason.copy(alpha = 0.7f),
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = item.recommendationReason,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                color = CardColors.recommendationReason.copy(alpha = 0.8f)
             )
         }
     }
@@ -267,7 +268,7 @@ private fun CardFormatBadge(
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+        color = CardColors.badgeBackground,
         tonalElevation = 0.dp
     ) {
         Row(
@@ -277,14 +278,14 @@ private fun CardFormatBadge(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                tint = CardColors.reference,
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                color = CardColors.reference
             )
         }
     }
