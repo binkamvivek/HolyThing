@@ -37,6 +37,8 @@ class UserPreferencesDataStore @Inject constructor(
         // Phase 4: Identity, Onboarding & Learning Engine
         val KEY_ANONYMOUS_USER_ID = stringPreferencesKey("pref_anon_user_id")
         val KEY_USER_MOOD = stringPreferencesKey("pref_user_mood")
+        val KEY_INITIAL_MOOD_HINT = stringPreferencesKey("pref_initial_mood_hint")
+        val KEY_MOOD_HINT_TIMESTAMP = longPreferencesKey("pref_mood_hint_timestamp")
         val KEY_USER_STYLES = stringSetPreferencesKey("pref_user_styles")
         val KEY_USER_GOAL = stringPreferencesKey("pref_user_goal")
         val KEY_HAS_SHOWN_SUPPORT_MESSAGE = booleanPreferencesKey("pref_has_shown_support_msg")
@@ -92,6 +94,14 @@ class UserPreferencesDataStore @Inject constructor(
     }
 
     val anonymousUserId: Flow<String?> = dataStore.data.map { it[KEY_ANONYMOUS_USER_ID] }
+
+    val initialMoodHint: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[KEY_INITIAL_MOOD_HINT]?.takeIf { it.isNotBlank() }
+    }
+
+    val moodHintTimestamp: Flow<Long> = dataStore.data.map { prefs ->
+        prefs[KEY_MOOD_HINT_TIMESTAMP] ?: 0L
+    }
 
     val onboardingPreferences: Flow<OnboardingPreferences> = dataStore.data.map { prefs ->
         OnboardingPreferences(
@@ -263,6 +273,18 @@ class UserPreferencesDataStore @Inject constructor(
     suspend fun markNotificationPrompted() {
         dataStore.edit { prefs ->
             prefs[KEY_HAS_PROMPTED_NOTIFICATION] = true
+        }
+    }
+
+    suspend fun setInitialMoodHint(mood: String?) {
+        dataStore.edit { prefs ->
+            if (mood.isNullOrBlank()) {
+                prefs.remove(KEY_INITIAL_MOOD_HINT)
+                prefs.remove(KEY_MOOD_HINT_TIMESTAMP)
+            } else {
+                prefs[KEY_INITIAL_MOOD_HINT] = mood.lowercase().trim()
+                prefs[KEY_MOOD_HINT_TIMESTAMP] = System.currentTimeMillis()
+            }
         }
     }
 

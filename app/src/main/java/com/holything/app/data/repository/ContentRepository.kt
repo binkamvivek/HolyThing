@@ -99,8 +99,9 @@ class ContentRepository @Inject constructor(
         val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
         return combine(
             cards,
-            dataStore.onboardingPreferences
-        ) { rawCards, onboardingPrefs ->
+            dataStore.onboardingPreferences,
+            dataStore.initialMoodHint
+        ) { rawCards, onboardingPrefs, moodHint ->
             if (rawCards.isEmpty()) return@combine emptyList<FeedCardItem>()
             // Exclude cards seen prior to this session, but keep cards seen during this session
             val seenCardIds = interactionDao.getRecentlySeenCardIdsBefore(thirtyDaysAgo, sessionStartTime).toSet()
@@ -121,7 +122,8 @@ class ContentRepository @Inject constructor(
                 amenedCardIds = amenedList.toSet(),
                 savedCardIds = savedList.toSet(),
                 lastInteractedCard = lastInteractedCard,
-                swipeCount = currentSwipeCount
+                swipeCount = currentSwipeCount,
+                initialMoodHint = moodHint
             )
         }
     }
@@ -327,6 +329,12 @@ class ContentRepository @Inject constructor(
 
     suspend fun getCardById(cardId: String): Card? = withContext(Dispatchers.IO) {
         cardDao.getCardById(cardId)?.toDomain()
+    }
+
+    val initialMoodHint: Flow<String?> = dataStore.initialMoodHint
+
+    suspend fun setInitialMoodHint(mood: String?) = withContext(Dispatchers.IO) {
+        dataStore.setInitialMoodHint(mood)
     }
 
     suspend fun updateMood(newMood: String) = withContext(Dispatchers.IO) {

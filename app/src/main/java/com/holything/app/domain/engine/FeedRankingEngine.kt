@@ -5,6 +5,21 @@ import com.holything.app.domain.model.FeedCardItem
 import com.holything.app.domain.model.OnboardingPreferences
 import com.holything.app.domain.model.TasteProfile
 
+/**
+ * Maps user-facing mood selections to database card mood tags.
+ * The cards in the database use: anxious, grateful, lost, tired, hopeful, sad, angry.
+ * "Lonely" is blended into a combination of "sad" and "lost".
+ */
+object MoodMapper {
+    fun mapMoodToCardTags(mood: String?): Set<String> {
+        if (mood.isNullOrBlank()) return emptySet()
+        return when (mood.lowercase().trim()) {
+            "lonely" -> setOf("sad", "lost")
+            else -> setOf(mood.lowercase().trim())
+        }
+    }
+}
+
 object FeedRankingEngine {
 
     // Natural biblical & emotional topical adjacencies
@@ -41,7 +56,8 @@ object FeedRankingEngine {
         amenedCardIds: Set<String>,
         savedCardIds: Set<String>,
         lastInteractedCard: Card? = null,
-        swipeCount: Int = 0
+        swipeCount: Int = 0,
+        initialMoodHint: String? = null
     ): List<FeedCardItem> {
         if (allCards.isEmpty()) return emptyList()
 
@@ -64,6 +80,13 @@ object FeedRankingEngine {
             }
         }
 
+        // Fading influence of initial mood hint: fades completely over the first 15 swipes
+        val hintWeight = if (!initialMoodHint.isNullOrBlank()) {
+            maxOf(0f, 1f - (swipeCount / 15f))
+        } else {
+            0f
+        }
+
         // 4. Style Test Mode (for first 10-15 swipes)
         if (swipeCount < 15) {
             return generateStyleTestFeed(
@@ -72,7 +95,9 @@ object FeedRankingEngine {
                 seriesTotals = seriesTotals,
                 amenedCardIds = amenedCardIds,
                 savedCardIds = savedCardIds,
-                nextStoryCard = nextStoryCard
+                nextStoryCard = nextStoryCard,
+                initialMoodHint = initialMoodHint,
+                hintWeight = hintWeight
             )
         }
 
@@ -81,7 +106,7 @@ object FeedRankingEngine {
         val adjacentTopics = ADJACENT_TOPICS[topTopic.lowercase()] ?: emptySet()
 
         val scoredCards = pool.map { card ->
-            val score = scoreCard(card, tasteProfile, onboardingPrefs)
+            val score = scoreCard(card, tasteProfile, onboardingPrefs, initialMoodHint, hintWeight)
             card to score
         }
 
@@ -189,7 +214,7 @@ object FeedRankingEngine {
                 isAmened = card.id in amenedCardIds,
                 isSaved = card.id in savedCardIds,
                 seriesTotalCount = card.seriesId?.let { seriesTotals[it] },
-                recommendationReason = generateReason(card, tasteProfile, onboardingPrefs, nextStoryCard)
+                recommendationReason = generateReason(card, tasteProfile, onboardingPrefs, nextStoryCard, initialMoodHint)
             )
         }
 
@@ -210,15 +235,23 @@ object FeedRankingEngine {
         seriesTotals: Map<String, Int>,
         amenedCardIds: Set<String>,
         savedCardIds: Set<String>,
-        nextStoryCard: Card?
+        nextStoryCard: Card?,
+        initialMoodHint: String? = null,
+        hintWeight: Float = 1f
     ): List<FeedCardItem> {
-        val targetMood = onboardingPrefs.mood.lowercase()
-        val preferredStyles = onboardingPrefs.styles
+        val targetTags = if (!initialMoodHint.isNullOrBlank() && hintWeight > 0f) {
+            MoodMapper.mapMoodToCardTags(initialMoodHint)
+        } else {
+            MoodMapper.mapMoodToCardTags(onboardingPrefs.mood)
+        }
+        val isHeavy = targetTags.any { it in OnboardingPreferences.HEAVY_MOODS } ||
+                initialMoodHint.equals("lonely", ignoreCase = true) ||
+                onboardingPrefs.isHeavyMood
 
-        // Find cards matching the chosen mood or comforting tone first
+        // Find cards matching the chosen mood tags or comforting tone first
         val relevant = pool.filter { card ->
-            card.moods.any { it.equals(targetMood, ignoreCase = true) } ||
-            (onboardingPrefs.isHeavyMood && card.tone.equals("comforting", ignoreCase = true))
+            card.moods.any { it.lowercase() in targetTags } ||
+            (isHeavy && card.tone.equals("comforting", ignoreCase = true))
         }.shuffled()
 
         val otherCards = pool.filterNot { it in relevant }.shuffled().toMutableList()
@@ -254,15 +287,22 @@ object FeedRankingEngine {
                 isSaved = card.id in savedCardIds,
                 seriesTotalCount = card.seriesId?.let { seriesTotals[it] },
                 recommendationReason = if (card == firstCard) {
-                    "Selected for you based on feeling ${onboardingPrefs.mood}"
+                    val displayMood = initialMoodHint ?: onboardingPrefs.mood
+                    "Selected for you based on feeling ${displayMood.replaceFirstChar { it.uppercase() }}"
                 } else {
-                    generateReason(card, TasteProfile(), onboardingPrefs, nextStoryCard)
+                    generateReason(card, TasteProfile(), onboardingPrefs, nextStoryCard, initialMoodHint)
                 }
             )
         }
     }
 
-    private fun scoreCard(card: Card, taste: TasteProfile, onboarding: OnboardingPreferences): Float {
+    private fun scoreCard(
+        card: Card,
+        taste: TasteProfile,
+        onboarding: OnboardingPreferences,
+        initialMoodHint: String? = null,
+        hintWeight: Float = 0f
+    ): Float {
         var score = 0f
         card.topics.forEach { t -> score += taste.getTopicScore(t) * 1.5f }
         score += taste.getFormatScore(card.format) * 1.2f
@@ -271,6 +311,13 @@ object FeedRankingEngine {
 
         if (onboarding.isHeavyMood && card.tone.equals("comforting", ignoreCase = true)) {
             score += 4.0f
+        }
+
+        if (!initialMoodHint.isNullOrBlank() && hintWeight > 0f) {
+            val tags = MoodMapper.mapMoodToCardTags(initialMoodHint)
+            if (card.moods.any { it.lowercase() in tags }) {
+                score += 4.0f * hintWeight
+            }
         }
         return score
     }
@@ -330,13 +377,17 @@ object FeedRankingEngine {
         card: Card,
         taste: TasteProfile,
         onboarding: OnboardingPreferences,
-        nextStory: Card?
+        nextStory: Card?,
+        initialMoodHint: String? = null
     ): String {
+        val hintTags = MoodMapper.mapMoodToCardTags(initialMoodHint)
         return when {
             nextStory != null && card.id == nextStory.id ->
                 "Continuing Part ${card.seriesOrder} of the story"
             card.tone.equals("challenging", ignoreCase = true) ->
                 "A gentle encouragement to stretch your heart"
+            !initialMoodHint.isNullOrBlank() && card.moods.any { it.lowercase() in hintTags } ->
+                "Encouragement for when you feel ${initialMoodHint.replaceFirstChar { it.uppercase() }}"
             taste.topTopic != null && card.topics.any { it.equals(taste.topTopic, ignoreCase = true) } ->
                 "Because you resonated with passages on ${taste.topTopic}"
             taste.topFormat != null && card.format.equals(taste.topFormat, ignoreCase = true) ->

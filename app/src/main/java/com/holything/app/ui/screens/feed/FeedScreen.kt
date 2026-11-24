@@ -53,7 +53,6 @@ import kotlinx.coroutines.launch
 import com.holything.app.ui.screens.feed.components.PauseCardView
 import com.holything.app.ui.screens.feed.components.ShareVerseSheet
 import com.holything.app.ui.screens.feed.components.FeedCardView
-import com.holything.app.ui.screens.feed.components.MoodRecheckDialog
 import com.holything.app.ui.screens.feed.components.ReflectBottomSheet
 import com.holything.app.ui.screens.feed.components.SupportBanner
 import com.holything.app.ui.screens.feed.components.WhyThisCardDialog
@@ -306,16 +305,6 @@ fun FeedScreen(
                 }
             }
         }
-    }
-
-    // Phase 4: Mood Recheck Dialog
-    if (uiState.showMoodRecheck) {
-        MoodRecheckDialog(
-            moods = uiState.availableMoods,
-            currentMood = uiState.currentMood,
-            onSelectNewMood = { viewModel.onMoodRechecked(it) },
-            onDismiss = { viewModel.dismissMoodRecheck() }
-        )
     }
 
     // Modal Reflection Sheet

@@ -32,7 +32,7 @@ data class FeedUiState(
     val isOffline: Boolean = false,
     val syncStatusMessage: String = "Ready",
     val showSupportBanner: Boolean = false,
-    val showMoodRecheck: Boolean = false,
+    val initialMoodHint: String? = null,
     val currentMood: String = "hopeful",
     val availableMoods: List<String> = OnboardingPreferences.DEFAULT_MOODS
 )
@@ -84,17 +84,17 @@ class FeedViewModel @Inject constructor(
     private data class UserPreferencesState(
         val onboarding: OnboardingPreferences,
         val supportShown: Boolean,
-        val swipes: Int,
+        val moodHint: String?,
         val moods: List<String>
     )
 
     private val userPrefsFlow = combine(
         dataStore.onboardingPreferences,
         dataStore.hasShownSupportMessage,
-        dataStore.swipeCount,
+        dataStore.initialMoodHint,
         repository.distinctMoods
-    ) { onboarding, supportShown, swipes, moods ->
-        UserPreferencesState(onboarding, supportShown, swipes, moods)
+    ) { onboarding, supportShown, moodHint, moods ->
+        UserPreferencesState(onboarding, supportShown, moodHint, moods)
     }
 
     val uiState: StateFlow<FeedUiState> = combine(
@@ -104,7 +104,6 @@ class FeedViewModel @Inject constructor(
         userPrefsFlow
     ) { items, count, status, userPrefs ->
         val shouldShowSupport = userPrefs.onboarding.isHeavyMood && !userPrefs.supportShown
-        val shouldShowMoodRecheck = userPrefs.swipes >= 25
         FeedUiState(
             items = items,
             totalCount = count,
@@ -114,8 +113,8 @@ class FeedViewModel @Inject constructor(
             isOffline = status.offline,
             syncStatusMessage = status.message,
             showSupportBanner = shouldShowSupport,
-            showMoodRecheck = shouldShowMoodRecheck,
-            currentMood = userPrefs.onboarding.mood,
+            initialMoodHint = userPrefs.moodHint,
+            currentMood = userPrefs.moodHint ?: userPrefs.onboarding.mood,
             availableMoods = userPrefs.moods
         )
     }.stateIn(
@@ -281,21 +280,19 @@ class FeedViewModel @Inject constructor(
         }
     }
 
-    fun onMoodRechecked(newMood: String) {
+    fun setInitialMoodHint(mood: String?) {
         viewModelScope.launch {
-            repository.updateMood(newMood)
-            dataStore.resetSwipeCount()
-            _userFeedbackEvent.emit("Tuning cards for feeling $newMood")
+            repository.setInitialMoodHint(mood)
+            val msg = if (mood != null) {
+                "Tuning cards for feeling ${mood.replaceFirstChar { it.uppercase() }}"
+            } else {
+                "Mood hint cleared"
+            }
+            _userFeedbackEvent.emit(msg)
             val freshFeed = repository.getFeedCards().first()
             _feedItemsFlow.value = freshFeed
             currentPageIndex = 0
             _targetScrollCardId.value = freshFeed.firstOrNull()?.card?.id
-        }
-    }
-
-    fun dismissMoodRecheck() {
-        viewModelScope.launch {
-            dataStore.resetSwipeCount()
         }
     }
 

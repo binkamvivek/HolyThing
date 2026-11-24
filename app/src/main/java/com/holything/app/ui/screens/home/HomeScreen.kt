@@ -109,28 +109,36 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Mood Chips FlowRow
-            val displayMoods = if (uiState.availableMoods.isNotEmpty()) {
-                uiState.availableMoods
-            } else {
-                listOf("Hopeful", "Anxious", "Grateful", "Tired", "Peaceful", "Lost", "Sad", "Joyful")
-            }
+            val displayMoods = listOf(
+                "Hopeful",
+                "Anxious",
+                "Grateful",
+                "Tired",
+                "Lonely",
+                "Lost",
+                "Sad",
+                "Angry"
+            )
 
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                displayMoods.take(8).forEach { mood ->
-                    val isSelected = mood.equals(uiState.currentMood, ignoreCase = true)
+                displayMoods.forEach { mood ->
+                    val isSelected = mood.equals(uiState.initialMoodHint, ignoreCase = true)
                     FilterChip(
                         selected = isSelected,
                         onClick = {
-                            viewModel.onMoodRechecked(mood.lowercase())
-                            onOpenFeed()
+                            if (isSelected) {
+                                viewModel.setInitialMoodHint(null)
+                            } else {
+                                viewModel.setInitialMoodHint(mood.lowercase())
+                            }
                         },
                         label = {
                             Text(
-                                text = mood.replaceFirstChar { it.uppercase() },
+                                text = mood,
                                 style = MaterialTheme.typography.labelMedium
                             )
                         },
