@@ -201,7 +201,6 @@ class FeedViewModel @Inject constructor(
             _feedItemsFlow.update { list ->
                 list.map { if (it.card.id == cardId) it.copy(isAmened = added) else it }
             }
-            _userFeedbackEvent.emit(if (added) "Amen" else "Amen removed")
         }
     }
 

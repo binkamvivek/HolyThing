@@ -7,6 +7,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -16,18 +18,19 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.ThumbDown
-import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun CardActionButtons(
@@ -36,8 +39,8 @@ fun CardActionButtons(
     onAmenToggle: () -> Unit,
     onSaveToggle: () -> Unit,
     onShare: () -> Unit,
-    onMoreLikeThis: () -> Unit,
-    onLessLikeThis: () -> Unit,
+    onMoreLikeThis: () -> Unit = {},
+    onLessLikeThis: () -> Unit = {},
     onReflect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -62,20 +65,31 @@ fun CardActionButtons(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Amen (Heart)
-        IconButton(
-            onClick = onAmenToggle,
-            modifier = Modifier
-                .size(48.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
+        // 1. Amen (Heart with small centered "Amen" label below)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                imageVector = if (isAmened) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                contentDescription = if (isAmened) "Remove Amen" else "Amen (Heart)",
-                tint = heartColor,
+            IconButton(
+                onClick = onAmenToggle,
                 modifier = Modifier
-                    .size(24.dp)
-                    .scale(heartScale)
+                    .size(48.dp)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = if (isAmened) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = if (isAmened) "Remove Amen" else "Amen (Heart)",
+                    tint = heartColor,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .scale(heartScale)
+                )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Amen",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = if (isAmened) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
             )
         }
 
@@ -121,36 +135,6 @@ fun CardActionButtons(
                 contentDescription = "Pause and Reflect",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(22.dp)
-            )
-        }
-
-        // 5. More like this
-        IconButton(
-            onClick = onMoreLikeThis,
-            modifier = Modifier
-                .size(48.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.ThumbUp,
-                contentDescription = "Show more like this",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        // 6. Less like this
-        IconButton(
-            onClick = onLessLikeThis,
-            modifier = Modifier
-                .size(48.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.ThumbDown,
-                contentDescription = "Show fewer like this",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
             )
         }
     }
