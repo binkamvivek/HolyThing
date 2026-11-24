@@ -1,14 +1,17 @@
 package com.holything.app.core.signal
 
+import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.data.local.room.dao.SignalDao
 import com.holything.app.data.local.room.entity.SessionSummaryEntity
 import com.holything.app.data.local.room.entity.SignalEventEntity
 import com.holything.app.domain.model.Card
 import com.holything.app.domain.signal.SignalScoreCalculator
 import com.holything.app.domain.signal.SignalScoringConfig
+import com.holything.app.domain.state.UserStateEstimator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -19,11 +22,13 @@ import javax.inject.Singleton
 
 /**
  * Captures per-card engagement signals off the main thread, computes dwell ratios
- * and engagement scores, and writes events in batches to Room.
+ * and engagement scores, updates UserStateEstimator, and writes events in batches to Room.
  */
 @Singleton
 class SignalCaptureManager @Inject constructor(
-    private val signalDao: SignalDao
+    private val signalDao: SignalDao,
+    private val dataStore: UserPreferencesDataStore,
+    private val userStateEstimator: UserStateEstimator
 ) {
     companion object {
         const val BATCH_SIZE = 10
@@ -68,6 +73,21 @@ class SignalCaptureManager @Inject constructor(
 
     private var totalDwellRatioSum: Float = 0f
     private var recordedEventCount: Int = 0
+    private var sessionInitialized: Boolean = false
+
+    private suspend fun ensureSessionInitializedLocked(nowMs: Long) {
+        if (sessionInitialized) return
+        sessionInitialized = true
+        val baseline = dataStore.moodBaseline.first()
+        val hint = dataStore.initialMoodHint.first()
+        val hintTs = dataStore.moodHintTimestamp.first()
+        userStateEstimator.startSession(
+            longTermBaseline = baseline,
+            initialMoodHint = hint,
+            hintTimestampMs = hintTs,
+            nowMs = nowMs
+        )
+    }
 
     fun onCardEntered(
         card: Card,
@@ -78,6 +98,7 @@ class SignalCaptureManager @Inject constructor(
         val now = System.currentTimeMillis()
         scope.launch {
             mutex.withLock {
+                ensureSessionInitializedLocked(now)
                 // Avoid duplicate re-entry if already tracking the exact same card & position
                 val current = activeCard
                 if (current != null && current.card.id == card.id && current.positionInSession == positionInSession) {
@@ -230,6 +251,12 @@ class SignalCaptureManager @Inject constructor(
         pendingEvents.add(event)
         totalDwellRatioSum += dwellRatio
         recordedEventCount += 1
+
+        userStateEstimator.onSignalEvent(
+            event = event,
+            cardMoods = session.card.moods,
+            nowMs = endTimeMs
+        )
     }
 
     private suspend fun flushIfBatchReadyLocked(now: Long) {
@@ -256,6 +283,7 @@ class SignalCaptureManager @Inject constructor(
                     averageDwellRatio = avgDwell
                 )
             )
+            dataStore.setMoodBaseline(userStateEstimator.computeUpdatedBaseline())
         }
     }
 }

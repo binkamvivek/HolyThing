@@ -39,6 +39,7 @@ class UserPreferencesDataStore @Inject constructor(
         val KEY_USER_MOOD = stringPreferencesKey("pref_user_mood")
         val KEY_INITIAL_MOOD_HINT = stringPreferencesKey("pref_initial_mood_hint")
         val KEY_MOOD_HINT_TIMESTAMP = longPreferencesKey("pref_mood_hint_timestamp")
+        val KEY_MOOD_BASELINE = stringPreferencesKey("pref_mood_baseline")
         val KEY_USER_STYLES = stringSetPreferencesKey("pref_user_styles")
         val KEY_USER_GOAL = stringPreferencesKey("pref_user_goal")
         val KEY_HAS_SHOWN_SUPPORT_MESSAGE = booleanPreferencesKey("pref_has_shown_support_msg")
@@ -101,6 +102,20 @@ class UserPreferencesDataStore @Inject constructor(
 
     val moodHintTimestamp: Flow<Long> = dataStore.data.map { prefs ->
         prefs[KEY_MOOD_HINT_TIMESTAMP] ?: 0L
+    }
+
+    val moodBaseline: Flow<Map<String, Float>?> = dataStore.data.map { prefs ->
+        val raw = prefs[KEY_MOOD_BASELINE] ?: return@map null
+        raw.split(";")
+            .mapNotNull { entry ->
+                val parts = entry.split("=")
+                if (parts.size == 2) {
+                    val v = parts[1].toFloatOrNull()
+                    if (v != null) parts[0] to v else null
+                } else null
+            }
+            .toMap()
+            .takeIf { it.isNotEmpty() }
     }
 
     val onboardingPreferences: Flow<OnboardingPreferences> = dataStore.data.map { prefs ->
@@ -285,6 +300,13 @@ class UserPreferencesDataStore @Inject constructor(
                 prefs[KEY_INITIAL_MOOD_HINT] = mood.lowercase().trim()
                 prefs[KEY_MOOD_HINT_TIMESTAMP] = System.currentTimeMillis()
             }
+        }
+    }
+
+    suspend fun setMoodBaseline(baseline: Map<String, Float>) {
+        val serialized = baseline.entries.joinToString(";") { "${it.key}=${it.value}" }
+        dataStore.edit { prefs ->
+            prefs[KEY_MOOD_BASELINE] = serialized
         }
     }
 
