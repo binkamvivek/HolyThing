@@ -9,6 +9,7 @@ import com.holything.app.data.local.room.dao.InteractionDao
 import com.holything.app.data.local.room.dao.JournalNoteDao
 import com.holything.app.data.local.room.dao.ReadingDayDao
 import com.holything.app.data.local.room.dao.SavedCardDao
+import com.holything.app.data.local.room.dao.SignalDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -44,5 +45,8 @@ object DatabaseModule {
 
     @Provides
     fun provideReadingDayDao(database: HolyThingDatabase): ReadingDayDao = database.readingDayDao()
+
+    @Provides
+    fun provideSignalDao(database: HolyThingDatabase): SignalDao = database.signalDao()
 }
 

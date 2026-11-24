@@ -2,12 +2,14 @@ package com.holything.app.ui.screens.feed
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.holything.app.core.signal.SignalCaptureManager
 import com.holything.app.data.repository.ContentRepository
 import com.holything.app.domain.model.Card
 import com.holything.app.domain.model.FeedCardItem
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.domain.model.OnboardingPreferences
 import com.holything.app.domain.model.SyncResult
+import com.holything.app.domain.signal.SignalScoringConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +42,8 @@ data class FeedUiState(
 @HiltViewModel
 class FeedViewModel @Inject constructor(
     private val repository: ContentRepository,
-    private val dataStore: UserPreferencesDataStore
+    private val dataStore: UserPreferencesDataStore,
+    private val signalCaptureManager: SignalCaptureManager
 ) : ViewModel() {
 
     private val isLoadingFlow = MutableStateFlow(true)
@@ -179,7 +182,10 @@ class FeedViewModel @Inject constructor(
      * Dwell tracking: records duration the user stayed on the card.
      * Flags fast-skips (< 1.5s) to avoid repeating unwanted cards.
      */
-    fun onPageChanged(newIndex: Int) {
+    fun onPageChanged(
+        newIndex: Int,
+        scrollSpeedBucket: String = SignalCaptureManager.SPEED_MEDIUM
+    ) {
         val items = uiState.value.items
         if (currentPageIndex in items.indices) {
             val previousCard = items[currentPageIndex].card
@@ -194,11 +200,44 @@ class FeedViewModel @Inject constructor(
                 )
             }
         }
+        val newItem = items.getOrNull(newIndex)
+        if (newItem != null && !newItem.isPauseCard) {
+            signalCaptureManager.onCardEntered(
+                card = newItem.card,
+                positionInSession = newIndex,
+                isVisibleEnough = true,
+                scrollSpeedBucket = scrollSpeedBucket
+            )
+        }
         currentPageIndex = newIndex
         pageStartTime = System.currentTimeMillis()
     }
 
+    fun onCardVisibilityChanged(pageIndex: Int, isVisibleEnough: Boolean) {
+        val item = uiState.value.items.getOrNull(pageIndex) ?: return
+        if (!item.isPauseCard) {
+            signalCaptureManager.onVisibilityChanged(item.card.id, isVisibleEnough)
+        }
+    }
+
+    fun onCardHesitation(pageIndex: Int) {
+        val item = uiState.value.items.getOrNull(pageIndex) ?: return
+        if (!item.isPauseCard) {
+            signalCaptureManager.onHesitationDetected(item.card.id)
+        }
+    }
+
+    fun flushSignals() {
+        signalCaptureManager.flush()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        signalCaptureManager.flush()
+    }
+
     fun onAmenToggle(cardId: String) {
+        signalCaptureManager.onActionTaken(cardId, SignalScoringConfig.ACTION_AMEN)
         viewModelScope.launch {
             val added = repository.toggleAmen(cardId)
             _feedItemsFlow.update { list ->
@@ -208,6 +247,7 @@ class FeedViewModel @Inject constructor(
     }
 
     fun onSaveToggle(cardId: String) {
+        signalCaptureManager.onActionTaken(cardId, SignalScoringConfig.ACTION_SAVE)
         viewModelScope.launch {
             val added = repository.toggleSave(cardId)
             _feedItemsFlow.update { list ->
@@ -218,6 +258,7 @@ class FeedViewModel @Inject constructor(
     }
 
     fun onShare(card: Card) {
+        signalCaptureManager.onActionTaken(card.id, SignalScoringConfig.ACTION_SHARE)
         viewModelScope.launch {
             repository.recordInteraction(cardId = card.id, type = "share", dwellMs = 0)
         }
@@ -245,6 +286,7 @@ class FeedViewModel @Inject constructor(
     }
 
     fun onReflect(cardId: String) {
+        signalCaptureManager.onActionTaken(cardId, SignalScoringConfig.ACTION_REFLECT)
         viewModelScope.launch {
             repository.recordInteraction(cardId = cardId, type = "reflect", dwellMs = 0)
         }

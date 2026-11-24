@@ -36,6 +36,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,6 +51,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.core.view.WindowCompat
+import com.holything.app.core.signal.SignalCaptureManager
+import com.holything.app.domain.signal.SignalScoringConfig
 import kotlinx.coroutines.launch
 import com.holything.app.ui.screens.feed.components.PauseCardView
 import com.holything.app.ui.screens.feed.components.ShareVerseSheet
@@ -186,10 +190,59 @@ fun FeedScreen(
                         }
                     }
 
-                    // Track page changes for dwell time
+                    var scrollStartTimeMs by remember { mutableLongStateOf(0L) }
+                    var hadSignificantDrag by remember { mutableStateOf(false) }
+                    var lastSettledPage by remember { mutableIntStateOf(pagerState.currentPage) }
+
+                    // Flush buffered signals when leaving the feed screen
+                    DisposableEffect(Unit) {
+                        onDispose {
+                            viewModel.flushSignals()
+                        }
+                    }
+
+                    // Track page changes and scroll speed bucket
                     LaunchedEffect(pagerState) {
                         snapshotFlow { pagerState.currentPage }.collect { pageIndex ->
-                            viewModel.onPageChanged(pageIndex)
+                            val transitionMs = if (scrollStartTimeMs > 0L) {
+                                System.currentTimeMillis() - scrollStartTimeMs
+                            } else {
+                                0L
+                            }
+                            val speedBucket = SignalCaptureManager.classifyScrollSpeed(transitionMs)
+                            viewModel.onPageChanged(pageIndex, speedBucket)
+                            lastSettledPage = pageIndex
+                            hadSignificantDrag = false
+                        }
+                    }
+
+                    // Track >= 60% visibility and hesitation (started swiping then returned)
+                    LaunchedEffect(pagerState) {
+                        val maxOffsetForSixtyPercentVisible = 1f - SignalScoringConfig.MIN_VISIBLE_FRACTION
+                        snapshotFlow {
+                            Triple(
+                                pagerState.isScrollInProgress,
+                                kotlin.math.abs(pagerState.currentPageOffsetFraction),
+                                pagerState.currentPage
+                            )
+                        }.collect { (isScrolling, absOffset, currentPage) ->
+                            val isVisibleEnough = absOffset <= maxOffsetForSixtyPercentVisible
+                            viewModel.onCardVisibilityChanged(currentPage, isVisibleEnough)
+
+                            if (isScrolling) {
+                                if (scrollStartTimeMs == 0L) {
+                                    scrollStartTimeMs = System.currentTimeMillis()
+                                }
+                                if (absOffset > 0.12f) {
+                                    hadSignificantDrag = true
+                                }
+                            } else {
+                                if (currentPage == lastSettledPage && hadSignificantDrag) {
+                                    viewModel.onCardHesitation(currentPage)
+                                }
+                                scrollStartTimeMs = 0L
+                                hadSignificantDrag = false
+                            }
                         }
                     }
 
