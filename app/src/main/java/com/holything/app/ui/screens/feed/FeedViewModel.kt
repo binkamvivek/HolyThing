@@ -39,8 +39,8 @@ data class FeedUiState(
     val isOffline: Boolean = false,
     val syncStatusMessage: String = "Ready",
     val showSupportBanner: Boolean = false,
+    val isLateNight: Boolean = false,
     val initialMoodHint: String? = null,
-    val currentMood: String = "hopeful",
     val availableMoods: List<String> = OnboardingPreferences.DEFAULT_MOODS
 )
 
@@ -106,13 +106,21 @@ class FeedViewModel @Inject constructor(
         UserPreferencesState(onboarding, supportShown, moodHint, moods)
     }
 
+    private val supportShownThisSessionFlow = MutableStateFlow(false)
+    private val supportDismissedThisSessionFlow = MutableStateFlow(false)
+
     val uiState: StateFlow<FeedUiState> = combine(
         _feedItemsFlow,
         repository.cardsCount,
         syncStatusFlow,
-        userPrefsFlow
-    ) { items, count, status, userPrefs ->
-        val shouldShowSupport = userPrefs.onboarding.isHeavyMood && !userPrefs.supportShown
+        userPrefsFlow,
+        userStateEstimator.state
+    ) { items, count, status, userPrefs, estimatedState ->
+        val careTriggered = estimatedState.isCareModeActive
+        if (careTriggered && !supportShownThisSessionFlow.value) {
+            supportShownThisSessionFlow.value = true
+        }
+        val shouldShowSupport = careTriggered && !supportDismissedThisSessionFlow.value
         FeedUiState(
             items = items,
             totalCount = count,
@@ -122,8 +130,8 @@ class FeedViewModel @Inject constructor(
             isOffline = status.offline,
             syncStatusMessage = status.message,
             showSupportBanner = shouldShowSupport,
+            isLateNight = estimatedState.isLateNight,
             initialMoodHint = userPrefs.moodHint,
-            currentMood = userPrefs.moodHint ?: userPrefs.onboarding.mood,
             availableMoods = userPrefs.moods
         )
     }.stateIn(
@@ -355,6 +363,7 @@ class FeedViewModel @Inject constructor(
     }
 
     fun dismissSupportBanner() {
+        supportDismissedThisSessionFlow.value = true
         viewModelScope.launch {
             dataStore.markSupportMessageShown()
         }

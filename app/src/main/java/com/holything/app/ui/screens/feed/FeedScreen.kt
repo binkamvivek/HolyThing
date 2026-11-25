@@ -65,7 +65,8 @@ import com.holything.app.ui.theme.CardColors
 @Composable
 fun FeedScreen(
     viewModel: FeedViewModel,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    onOpenResources: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val activeJournalNote by viewModel.activeJournalNote.collectAsState()
@@ -263,6 +264,7 @@ fun FeedScreen(
                             if (item.isPauseCard) {
                                 PauseCardView(
                                     milestoneCount = item.cardsReadMilestone,
+                                    isLateNight = uiState.isLateNight,
                                     onReflect = { activeReflectCard = item.card },
                                     onKeepGoing = {
                                         scope.launch {
@@ -329,6 +331,7 @@ fun FeedScreen(
             if (uiState.showSupportBanner) {
                 SupportBanner(
                     onDismiss = { viewModel.dismissSupportBanner() },
+                    onOpenResources = onOpenResources,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()

@@ -17,7 +17,8 @@ data class UserStateEstimate(
     val moodBelief: Map<String, Float> = UserStateConfig.uniformDistribution(),
     val confidence: Float = 0f,
     val sessionMode: SessionMode = SessionMode.READING,
-    val isLateNight: Boolean = false
+    val isLateNight: Boolean = false,
+    val isCareModeActive: Boolean = false
 )
 
 /**
@@ -52,6 +53,11 @@ object UserStateConfig {
     const val DEEP_DWELL_RATIO_THRESHOLD: Float = 1.0f
     const val LATE_NIGHT_START_HOUR: Int = 23
     const val LATE_NIGHT_END_HOUR: Int = 5
+
+    // Care rule thresholds
+    const val CARE_MIN_CARDS: Int = 15
+    const val CARE_HEAVY_BELIEF_THRESHOLD: Float = 0.45f
+    const val CARE_MIN_CONFIDENCE: Float = 0.25f
 
     fun uniformDistribution(): Map<String, Float> {
         val p = 1f / CARD_MOODS.size.toFloat()

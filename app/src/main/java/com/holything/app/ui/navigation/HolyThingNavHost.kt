@@ -97,7 +97,12 @@ fun HolyThingNavHost(
             composable(Screen.FeedPager.route) {
                 FeedScreen(
                     viewModel = feedViewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onOpenResources = {
+                        navController.navigate(Screen.Profile.route) {
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
             composable(Screen.Saved.route) {

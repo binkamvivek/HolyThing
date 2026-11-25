@@ -36,6 +36,7 @@ import com.holything.app.ui.theme.CardColors
 @Composable
 fun PauseCardView(
     milestoneCount: Int = 25,
+    isLateNight: Boolean = false,
     onReflect: () -> Unit,
     onKeepGoing: () -> Unit,
     modifier: Modifier = Modifier
@@ -78,7 +79,11 @@ fun PauseCardView(
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
-                text = "You've read $milestoneCount verses.",
+                text = if (isLateNight) {
+                    "It's getting late. You've read $milestoneCount verses."
+                } else {
+                    "You've read $milestoneCount verses."
+                },
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Medium
@@ -90,7 +95,11 @@ fun PauseCardView(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Want to pause and pray on one?",
+                text = if (isLateNight) {
+                    "Consider resting your eyes and putting the phone down for the night. Grace will meet you tomorrow."
+                } else {
+                    "Want to pause and pray on one?"
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = CardColors.insight,
                 textAlign = TextAlign.Center,

@@ -126,7 +126,8 @@ class ContentRepository @Inject constructor(
                 amenedCardIds = amenedList.toSet(),
                 savedCardIds = savedList.toSet(),
                 seriesState = SessionSeriesState(),
-                swipeCount = currentSwipeCount
+                swipeCount = currentSwipeCount,
+                initialMoodHint = moodHint
             )
         }
     }
@@ -152,6 +153,7 @@ class ContentRepository @Inject constructor(
 
         val remainingPool = rawCards.filterNot { it.id in lockedCardIds }
         if (remainingPool.isEmpty()) return@withContext emptyList()
+        val moodHint = dataStore.initialMoodHint.first()
 
         AdaptiveFeedRanker.rankFeed(
             allCards = remainingPool,
@@ -162,7 +164,8 @@ class ContentRepository @Inject constructor(
             amenedCardIds = amenedList.toSet(),
             savedCardIds = savedList.toSet(),
             seriesState = seriesState,
-            swipeCount = currentSwipeCount
+            swipeCount = currentSwipeCount,
+            initialMoodHint = moodHint
         ).filterNot { it.isPauseCard }
     }
 

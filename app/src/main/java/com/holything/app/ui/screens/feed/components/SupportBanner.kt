@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SupportBanner(
     onDismiss: () -> Unit,
+    onOpenResources: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -43,16 +45,22 @@ fun SupportBanner(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "If you're hurting, you're not alone.",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Talk to someone you trust or find support. God is with you in the middle of this.",
+                    text = "If you're hurting, you're not alone. Talk to someone you trust or find support.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (onOpenResources != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(
+                        onClick = onOpenResources,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = "Open Care & Support Resources",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
             IconButton(
                 onClick = onDismiss,

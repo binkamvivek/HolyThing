@@ -36,6 +36,8 @@ class UserStateEstimator @Inject constructor() {
     private val recentEvents = ArrayDeque<SignalEventEntity>(UserStateConfig.SKIM_WINDOW_SIZE)
     private val sessionBeliefSum = UserStateConfig.CARD_MOODS.associateWith { 0f }.toMutableMap()
     private var sessionEventCount: Int = 0
+    private var heavyBeliefStreakCards: Int = 0
+    private var isSadChipToday: Boolean = false
 
     /**
      * Starts or resets a session from the user's long-term baseline plus today's home chip hint (if any).
@@ -55,6 +57,8 @@ class UserStateEstimator @Inject constructor() {
         val isHintFromToday = !initialMoodHint.isNullOrBlank() &&
             hintTimestampMs > 0L &&
             isSameLocalDay(hintTimestampMs, nowMs)
+        isSadChipToday = isHintFromToday && initialMoodHint.equals("sad", ignoreCase = true)
+        heavyBeliefStreakCards = 0
 
         if (isHintFromToday) {
             val mappedTags = MoodMapper.mapMoodToCardTags(initialMoodHint)
@@ -157,6 +161,19 @@ class UserStateEstimator @Inject constructor() {
         }
         sessionEventCount += 1
 
+        // Care rule: track sustained sad/lost/anxious belief with good confidence
+        val heavyBeliefSum = (currentBelief["sad"] ?: 0f) +
+            (currentBelief["lost"] ?: 0f) +
+            (currentBelief["anxious"] ?: 0f)
+        val confidence = computeConfidence(currentBelief)
+        if (heavyBeliefSum >= UserStateConfig.CARE_HEAVY_BELIEF_THRESHOLD &&
+            confidence >= UserStateConfig.CARE_MIN_CONFIDENCE
+        ) {
+            heavyBeliefStreakCards += 1
+        } else {
+            heavyBeliefStreakCards = 0
+        }
+
         publishState(hourOfDay = event.hourOfDay)
     }
 
@@ -180,11 +197,13 @@ class UserStateEstimator @Inject constructor() {
 
     private fun publishState(hourOfDay: Int) {
         val beliefSnapshot = currentBelief.toMap()
+        val careActive = isSadChipToday || heavyBeliefStreakCards >= UserStateConfig.CARE_MIN_CARDS
         _state.value = UserStateEstimate(
             moodBelief = beliefSnapshot,
             confidence = computeConfidence(beliefSnapshot),
             sessionMode = classifySessionMode(),
-            isLateNight = isLateNightHour(hourOfDay)
+            isLateNight = isLateNightHour(hourOfDay),
+            isCareModeActive = careActive
         )
     }
 
