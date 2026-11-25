@@ -214,4 +214,105 @@ class AdaptiveFeedRankerTest {
 
         assertEquals(10, fallbackRanked.size)
     }
+
+    @Test
+    fun `new users exit cold-start path after 6 swipes and cold-start respects session mode`() {
+        val cards = (1..20).map { i ->
+            makeCard(
+                id = "cs-$i",
+                format = if (i % 2 == 0) "story" else "verse",
+                topic = "peace",
+                length = if (i % 2 == 0) "long" else "short",
+                book = "Book$i"
+            )
+        }
+        val profileAfter6 = LongTermBetaProfile(
+            mapOf(
+                (BetaDimension.FORMAT to "verse") to BetaParams(alpha = 5.5f, beta = 1.5f),
+                (BetaDimension.FORMAT to "story") to BetaParams(alpha = 1.5f, beta = 3.5f),
+                (BetaDimension.TOPIC to "peace") to BetaParams(alpha = 5.5f, beta = 1.5f)
+            )
+        )
+
+        // At swipeCount = 2 (< 6), user is in cold-start format comparison,
+        // and skimming/late-night should prioritize short/verse over long/story
+        val coldStartSkimming = AdaptiveFeedRanker.rankFeed(
+            allCards = cards,
+            userState = UserStateEstimate(sessionMode = SessionMode.SKIMMING, isLateNight = true),
+            betaProfile = LongTermBetaProfile(),
+            onboardingPrefs = OnboardingPreferences(goal = "Peace"),
+            seenCardIds = emptySet(),
+            amenedCardIds = emptySet(),
+            savedCardIds = emptySet(),
+            swipeCount = 2,
+            seed = 11L
+        ).filterNot { it.isPauseCard }
+
+        assertTrue(coldStartSkimming.take(6).any { it.recommendationReason.startsWith("Exploring ") })
+        assertEquals("verse", coldStartSkimming.first().card.format)
+        assertEquals("short", coldStartSkimming.first().card.length)
+
+        // At swipeCount = 6, user exits cold-start path immediately
+        val postColdStart = AdaptiveFeedRanker.rankFeed(
+            allCards = cards,
+            userState = UserStateEstimate(confidence = 0.6f, sessionMode = SessionMode.READING),
+            betaProfile = profileAfter6,
+            onboardingPrefs = OnboardingPreferences(goal = "Peace"),
+            seenCardIds = emptySet(),
+            amenedCardIds = emptySet(),
+            savedCardIds = emptySet(),
+            swipeCount = 6,
+            seed = 11L
+        ).filterNot { it.isPauseCard }
+
+        assertTrue(postColdStart.none { it.recommendationReason.startsWith("Exploring ") })
+    }
+
+    @Test
+    fun `interleaved 20-card schedule never places wildcards consecutively or clumps 4 adjacent cards`() {
+        listOf(0.9f, 0.3f, 0.0f).forEach { conf ->
+            val (best, adj, _) = AdaptiveFeedRanker.computeMixRatios(conf)
+            val schedule = AdaptiveFeedRanker.buildCycleSchedule(best, adj)
+            assertEquals(20, schedule.size)
+            assertTrue("Expected >= 2 wildcards for conf=$conf", schedule.count { it == BucketSlot.WILDCARD } >= 2)
+
+            for (i in 0 until schedule.size) {
+                val next = (i + 1) % schedule.size
+                assertFalse(
+                    "Consecutive wildcards at $i and $next for conf=$conf",
+                    schedule[i] == BucketSlot.WILDCARD && schedule[next] == BucketSlot.WILDCARD
+                )
+            }
+            for (i in 3 until schedule.size) {
+                val window = schedule.subList(i - 3, i + 1)
+                assertFalse(
+                    "4 consecutive adjacent slots at $i for conf=$conf",
+                    window.all { it == BucketSlot.ADJACENT }
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `tighter Beta prior reports 0 trials when unseen and preserves legacy Room rows`() {
+        val profile = LongTermBetaProfile()
+        val unseen = profile.getParams(BetaDimension.TOPIC, "grace")
+        assertEquals(1.5f, unseen.alpha, 0.001f)
+        assertEquals(1.5f, unseen.beta, 0.001f)
+        assertEquals(0f, unseen.totalTrials, 0.001f)
+
+        val legacyProfile = LongTermBetaProfile.fromEntities(
+            listOf(
+                com.holything.app.data.local.room.entity.BetaAffinityEntity(
+                    dimension = BetaDimension.TOPIC,
+                    value = "hope",
+                    alpha = 1f,
+                    beta = 1f
+                )
+            )
+        )
+        val legacy = legacyProfile.getParams(BetaDimension.TOPIC, "hope")
+        assertEquals(1f, legacy.alpha, 0.001f)
+        assertEquals(0f, legacy.totalTrials, 0.001f)
+    }
 }

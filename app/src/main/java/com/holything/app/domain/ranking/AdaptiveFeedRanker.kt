@@ -34,10 +34,12 @@ object AdaptiveRankerConfig {
     const val BASE_WILDCARD_RATIO = 0.10f
     const val MIN_WILDCARD_RATIO = 0.10f
 
-    const val NEW_USER_INTERACTION_THRESHOLD = 15
+    const val NEW_USER_INTERACTION_THRESHOLD = 6
     const val SERIES_INSERT_WINDOW_MAX = 3
     const val PAUSE_CARD_INTERVAL = 25
 }
+
+internal enum class BucketSlot { BEST, ADJACENT, WILDCARD }
 
 /**
  * Standalone, deterministic-seedable feed ranker using Phase 3 UserStateEstimate
@@ -168,8 +170,7 @@ object AdaptiveFeedRanker {
         val rankedCards = mutableListOf<Card>()
         val fatigueHistory = recentHistory.toMutableList()
         var comfortingCount = 0
-        val targetBestSteps = (20 * bestShare).roundToInt().coerceAtLeast(10)
-        val targetAdjacentSteps = (20 * adjacentShare).roundToInt().coerceAtLeast(2)
+        val schedule = buildCycleSchedule(bestShare, adjacentShare)
 
         var step = swipeCount
         while (bestCandidates.isNotEmpty() || adjacentCandidates.isNotEmpty() ||
@@ -190,46 +191,17 @@ object AdaptiveFeedRanker {
             val needComfort = userState.isCareModeActive &&
                 (comfortingCount.toFloat() / (rankedCards.size + 1).toFloat()) < 0.60f
 
-            val cyclePos = step % 20
+            val slotType = schedule[step % schedule.size]
+            val buckets = when (slotType) {
+                BucketSlot.BEST -> listOf(bestCandidates, adjacentCandidates, wildcardCandidates)
+                BucketSlot.ADJACENT -> listOf(adjacentCandidates, bestCandidates, wildcardCandidates)
+                BucketSlot.WILDCARD -> listOf(wildcardCandidates, adjacentCandidates, bestCandidates)
+            }
             val candidate = if (needComfort) {
-                when {
-                    cyclePos < targetBestSteps -> {
-                        pickComfortingValid(bestCandidates, fatigueHistory)
-                            ?: pickComfortingValid(adjacentCandidates, fatigueHistory)
-                            ?: pickComfortingValid(wildcardCandidates, fatigueHistory)
-                    }
-                    cyclePos < targetBestSteps + targetAdjacentSteps -> {
-                        pickComfortingValid(adjacentCandidates, fatigueHistory)
-                            ?: pickComfortingValid(bestCandidates, fatigueHistory)
-                            ?: pickComfortingValid(wildcardCandidates, fatigueHistory)
-                    }
-                    else -> {
-                        pickComfortingValid(wildcardCandidates, fatigueHistory)
-                            ?: pickComfortingValid(adjacentCandidates, fatigueHistory)
-                            ?: pickComfortingValid(bestCandidates, fatigueHistory)
-                    }
-                }
-                    ?: pickValid(bestCandidates, fatigueHistory)
-                    ?: pickValid(adjacentCandidates, fatigueHistory)
-                    ?: pickValid(wildcardCandidates, fatigueHistory)
+                buckets.firstNotNullOfOrNull { pickComfortingValid(it, fatigueHistory) }
+                    ?: buckets.firstNotNullOfOrNull { pickValid(it, fatigueHistory) }
             } else {
-                when {
-                    cyclePos < targetBestSteps -> {
-                        pickValid(bestCandidates, fatigueHistory)
-                            ?: pickValid(adjacentCandidates, fatigueHistory)
-                            ?: pickValid(wildcardCandidates, fatigueHistory)
-                    }
-                    cyclePos < targetBestSteps + targetAdjacentSteps -> {
-                        pickValid(adjacentCandidates, fatigueHistory)
-                            ?: pickValid(bestCandidates, fatigueHistory)
-                            ?: pickValid(wildcardCandidates, fatigueHistory)
-                    }
-                    else -> {
-                        pickValid(wildcardCandidates, fatigueHistory)
-                            ?: pickValid(adjacentCandidates, fatigueHistory)
-                            ?: pickValid(bestCandidates, fatigueHistory)
-                    }
-                }
+                buckets.firstNotNullOfOrNull { pickValid(it, fatigueHistory) }
             }
 
             if (candidate != null) {
@@ -286,6 +258,32 @@ object AdaptiveFeedRanker {
         val adjacent = AdaptiveRankerConfig.BASE_ADJACENT_RATIO + extraExploration * 0.5f
         val best = (1f - wildcard - adjacent).coerceAtLeast(0.50f)
         return Triple(best, adjacent, wildcard)
+    }
+
+    internal fun buildCycleSchedule(
+        bestShare: Float,
+        adjacentShare: Float,
+        cycleSize: Int = 20
+    ): List<BucketSlot> {
+        val slots = MutableList(cycleSize) { BucketSlot.BEST }
+        val targetBest = (cycleSize * bestShare).roundToInt().coerceAtLeast(10)
+        val targetAdjacent = (cycleSize * adjacentShare).roundToInt().coerceAtLeast(2)
+        val targetWildcards = (cycleSize - targetBest - targetAdjacent).coerceAtLeast(2)
+
+        // Space wildcards evenly across the cycle so two wildcards never appear back-to-back
+        for (i in 0 until targetWildcards) {
+            val pos = (((i + 1) * cycleSize) / targetWildcards) - 1
+            slots[pos.coerceIn(0, cycleSize - 1)] = BucketSlot.WILDCARD
+        }
+
+        // Space adjacent slots evenly across the remaining open positions
+        val openIndices = slots.indices.filter { slots[it] == BucketSlot.BEST }
+        val adjCount = targetAdjacent.coerceAtMost(openIndices.size)
+        for (i in 0 until adjCount) {
+            val openPos = (((i + 1) * openIndices.size) / adjCount) - 1
+            slots[openIndices[openPos.coerceIn(0, openIndices.lastIndex)]] = BucketSlot.ADJACENT
+        }
+        return slots
     }
 
     internal fun scoreCard(
@@ -442,16 +440,31 @@ object AdaptiveFeedRanker {
             pool.flatMap { it.topics }.groupingBy { it.lowercase() }.eachCount().maxByOrNull { it.value }?.key ?: goalTopic
         }
 
+        val sessionFitScore: (Card) -> Float = { card ->
+            computeSessionFormatFit(card.format, userState.sessionMode) +
+                computeSessionLengthFit(card.length, userState.sessionMode, userState.isLateNight)
+        }
+
         val topicCards = pool.filter { card ->
             card.topics.any { it.equals(focusTopic, ignoreCase = true) }
-        }.shuffled(random).toMutableList()
+        }.shuffled(random).sortedByDescending(sessionFitScore).toMutableList()
 
-        val remainingPool = pool.filterNot { it in topicCards }.shuffled(random).toMutableList()
+        val remainingPool = pool.filterNot { it in topicCards }
+            .shuffled(random)
+            .sortedByDescending(sessionFitScore)
+            .toMutableList()
 
         val result = mutableListOf<Card>()
         val fatigueHistory = recentHistory.toMutableList()
         var comfortingCount = 0
-        val targetFormats = listOf("verse", "story", "didyouknow", "question")
+        val targetFormats = when {
+            userState.sessionMode == SessionMode.SKIMMING || userState.isLateNight ->
+                listOf("verse", "question", "didyouknow")
+            userState.sessionMode == SessionMode.DEEP ->
+                listOf("story", "didyouknow", "question", "verse")
+            else ->
+                listOf("verse", "story", "didyouknow", "question")
+        }
         var formatCursor = 0
 
         while (result.size < AdaptiveRankerConfig.NEW_USER_INTERACTION_THRESHOLD &&

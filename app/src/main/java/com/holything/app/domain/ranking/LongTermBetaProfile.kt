@@ -16,11 +16,15 @@ object BetaDimension {
 }
 
 data class BetaParams(
-    val alpha: Float = 1f,
-    val beta: Float = 1f
+    val alpha: Float = DEFAULT_PRIOR,
+    val beta: Float = DEFAULT_PRIOR
 ) {
     val totalTrials: Float
-        get() = (alpha - 1f).coerceAtLeast(0f) + (beta - 1f).coerceAtLeast(0f)
+        get() = (alpha - DEFAULT_PRIOR).coerceAtLeast(0f) + (beta - DEFAULT_PRIOR).coerceAtLeast(0f)
+
+    companion object {
+        const val DEFAULT_PRIOR = 1.5f
+    }
 
     fun mean(): Float = alpha / (alpha + beta)
 
