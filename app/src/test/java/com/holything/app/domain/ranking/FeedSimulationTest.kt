@@ -139,8 +139,8 @@ class FeedSimulationTest {
         for (step in 0 until 100) {
             val entries = (alphaMap.keys + betaMap.keys).associateWith { key ->
                 BetaParams(
-                    alpha = (alphaMap[key] ?: 1f).coerceAtLeast(1f),
-                    beta = (betaMap[key] ?: 1f).coerceAtLeast(1f)
+                    alpha = (alphaMap[key] ?: BetaParams.DEFAULT_PRIOR).coerceAtLeast(BetaParams.DEFAULT_PRIOR),
+                    beta = (betaMap[key] ?: BetaParams.DEFAULT_PRIOR).coerceAtLeast(BetaParams.DEFAULT_PRIOR)
                 )
             }
             val betaProfile = LongTermBetaProfile(entries)
@@ -231,8 +231,8 @@ class FeedSimulationTest {
                 add(BetaDimension.LENGTH to card.length)
             }
             dims.forEach { key ->
-                alphaMap[key] = (alphaMap[key] ?: 1f) + pos
-                betaMap[key] = (betaMap[key] ?: 1f) + neg
+                alphaMap[key] = (alphaMap[key] ?: BetaParams.DEFAULT_PRIOR) + pos
+                betaMap[key] = (betaMap[key] ?: BetaParams.DEFAULT_PRIOR) + neg
             }
 
             // Update series continuation

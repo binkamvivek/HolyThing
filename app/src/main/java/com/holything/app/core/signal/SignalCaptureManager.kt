@@ -346,13 +346,15 @@ class SignalCaptureManager @Inject constructor(
 
         val updatedEntities = pairs.map { (dim, value) ->
             val existing = betaProfileDao.getAffinity(dim, value)
-            val prevAlpha = existing?.alpha ?: 1f
-            val prevBeta = existing?.beta ?: 1f
+            val prevAlpha = (existing?.alpha ?: com.holything.app.domain.ranking.BetaParams.DEFAULT_PRIOR)
+                .coerceAtLeast(com.holything.app.domain.ranking.BetaParams.DEFAULT_PRIOR)
+            val prevBeta = (existing?.beta ?: com.holything.app.domain.ranking.BetaParams.DEFAULT_PRIOR)
+                .coerceAtLeast(com.holything.app.domain.ranking.BetaParams.DEFAULT_PRIOR)
             BetaAffinityEntity(
                 dimension = dim,
                 value = value,
-                alpha = (prevAlpha + posDelta).coerceAtLeast(1f),
-                beta = (prevBeta + negDelta).coerceAtLeast(1f),
+                alpha = prevAlpha + posDelta,
+                beta = prevBeta + negDelta,
                 updatedAt = nowMs
             )
         }

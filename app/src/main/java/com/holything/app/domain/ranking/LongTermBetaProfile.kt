@@ -112,7 +112,10 @@ data class LongTermBetaProfile(
         fun fromEntities(entities: List<BetaAffinityEntity>): LongTermBetaProfile {
             val map = entities.associate { entity ->
                 (entity.dimension to entity.value.lowercase().trim()) to
-                    BetaParams(alpha = entity.alpha.coerceAtLeast(1f), beta = entity.beta.coerceAtLeast(1f))
+                    BetaParams(
+                        alpha = entity.alpha.coerceAtLeast(BetaParams.DEFAULT_PRIOR),
+                        beta = entity.beta.coerceAtLeast(BetaParams.DEFAULT_PRIOR)
+                    )
             }
             return LongTermBetaProfile(map)
         }

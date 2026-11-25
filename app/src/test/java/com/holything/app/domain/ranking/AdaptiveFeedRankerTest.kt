@@ -308,11 +308,21 @@ class AdaptiveFeedRankerTest {
                     value = "hope",
                     alpha = 1f,
                     beta = 1f
+                ),
+                com.holything.app.data.local.room.entity.BetaAffinityEntity(
+                    dimension = BetaDimension.TOPIC,
+                    value = "peace",
+                    alpha = 1.9f,
+                    beta = 1.5f
                 )
             )
         )
         val legacy = legacyProfile.getParams(BetaDimension.TOPIC, "hope")
-        assertEquals(1f, legacy.alpha, 0.001f)
+        assertEquals(1.5f, legacy.alpha, 0.001f)
         assertEquals(0f, legacy.totalTrials, 0.001f)
+
+        val updated = legacyProfile.getParams(BetaDimension.TOPIC, "peace")
+        assertEquals(0.4f, updated.totalTrials, 0.001f)
+        assertTrue(legacyProfile.hasSeenDimensionValue(BetaDimension.TOPIC, "peace"))
     }
 }
