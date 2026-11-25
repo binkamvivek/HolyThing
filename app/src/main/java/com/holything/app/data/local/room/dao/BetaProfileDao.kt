@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.holything.app.data.local.room.entity.BetaAffinityEntity
+import com.holything.app.data.local.room.entity.MoodBaselineEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -23,4 +24,13 @@ interface BetaProfileDao {
 
     @Query("DELETE FROM beta_affinities")
     suspend fun clearAll()
+
+    @Query("SELECT * FROM mood_baseline")
+    suspend fun getMoodBaselineList(): List<MoodBaselineEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMoodBaseline(items: List<MoodBaselineEntity>)
+
+    @Query("DELETE FROM mood_baseline")
+    suspend fun clearMoodBaseline()
 }

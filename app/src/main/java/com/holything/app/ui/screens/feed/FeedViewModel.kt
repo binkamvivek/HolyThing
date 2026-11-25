@@ -254,6 +254,11 @@ class FeedViewModel @Inject constructor(
                 isVisibleEnough = true,
                 scrollSpeedBucket = scrollSpeedBucket
             )
+            signalCaptureManager.recordServedCard(
+                cardId = newItem.card.id,
+                verseRef = newItem.card.verseRef,
+                reason = newItem.recommendationReason
+            )
         }
         currentPageIndex = newIndex
         pageStartTime = System.currentTimeMillis()

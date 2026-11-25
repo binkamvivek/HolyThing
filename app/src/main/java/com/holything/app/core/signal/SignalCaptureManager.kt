@@ -4,6 +4,7 @@ import com.holything.app.data.local.datastore.UserPreferencesDataStore
 import com.holything.app.data.local.room.dao.BetaProfileDao
 import com.holything.app.data.local.room.dao.SignalDao
 import com.holything.app.data.local.room.entity.BetaAffinityEntity
+import com.holything.app.data.local.room.entity.MoodBaselineEntity
 import com.holything.app.data.local.room.entity.SessionSummaryEntity
 import com.holything.app.data.local.room.entity.SignalEventEntity
 import com.holything.app.domain.model.Card
@@ -86,10 +87,47 @@ class SignalCaptureManager @Inject constructor(
     private val _seriesState = MutableStateFlow(SessionSeriesState())
     val seriesState: StateFlow<SessionSeriesState> = _seriesState.asStateFlow()
 
+    data class ServedCardDebugInfo(
+        val cardId: String,
+        val verseRef: String,
+        val reason: String
+    )
+
+    private val _recentServedCards = MutableStateFlow<List<ServedCardDebugInfo>>(emptyList())
+    val recentServedCards: StateFlow<List<ServedCardDebugInfo>> = _recentServedCards.asStateFlow()
+
+    fun recordServedCard(cardId: String, verseRef: String, reason: String) {
+        val current = _recentServedCards.value
+        if (current.firstOrNull()?.cardId == cardId) return
+        _recentServedCards.value = (listOf(ServedCardDebugInfo(cardId, verseRef, reason)) + current).take(20)
+    }
+
+    fun resetSessionState() {
+        scope.launch {
+            mutex.withLock {
+                pendingEvents.clear()
+                activeCard = null
+                lastPosition = -1
+                seenCardIds.clear()
+                totalDwellRatioSum = 0f
+                recordedEventCount = 0
+                sessionInitialized = false
+                sessionId = UUID.randomUUID().toString()
+                sessionStartTimeMs = System.currentTimeMillis()
+                _seriesState.value = SessionSeriesState()
+                _recentServedCards.value = emptyList()
+                userStateEstimator.startSession(nowMs = sessionStartTimeMs)
+            }
+        }
+    }
+
     private suspend fun ensureSessionInitializedLocked(nowMs: Long) {
         if (sessionInitialized) return
         sessionInitialized = true
-        val baseline = dataStore.moodBaseline.first()
+        val roomBaseline = betaProfileDao.getMoodBaselineList()
+            .associate { it.mood to it.probability }
+            .takeIf { it.isNotEmpty() }
+        val baseline = roomBaseline ?: dataStore.moodBaseline.first()
         val hint = dataStore.initialMoodHint.first()
         val hintTs = dataStore.moodHintTimestamp.first()
         userStateEstimator.startSession(
@@ -347,7 +385,13 @@ class SignalCaptureManager @Inject constructor(
                     averageDwellRatio = avgDwell
                 )
             )
-            dataStore.setMoodBaseline(userStateEstimator.computeUpdatedBaseline())
+            val updatedBaseline = userStateEstimator.computeUpdatedBaseline()
+            betaProfileDao.upsertMoodBaseline(
+                updatedBaseline.map { (mood, prob) ->
+                    MoodBaselineEntity(mood = mood, probability = prob, updatedAt = now)
+                }
+            )
+            dataStore.setMoodBaseline(updatedBaseline)
         }
     }
 }

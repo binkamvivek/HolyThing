@@ -56,7 +56,12 @@ object AdaptiveFeedRanker {
         "gratitude" to setOf("prayer", "faith", "hope", "joy"),
         "wisdom" to setOf("purpose", "work", "identity"),
         "purpose" to setOf("identity", "wisdom", "faith", "work"),
-        "love" to setOf("relationships", "forgiveness", "comfort")
+        "love" to setOf("relationships", "forgiveness", "comfort"),
+        "faith" to setOf("hope", "patience", "strength", "gratitude"),
+        "patience" to setOf("peace", "strength", "hope", "comfort"),
+        "comfort" to setOf("peace", "grief", "love", "hope"),
+        "joy" to setOf("gratitude", "hope", "love", "faith"),
+        "rest" to setOf("peace", "patience", "comfort", "hope")
     )
 
     fun rankFeed(
@@ -70,7 +75,8 @@ object AdaptiveFeedRanker {
         seriesState: SessionSeriesState = SessionSeriesState(),
         swipeCount: Int = 0,
         seed: Long? = null,
-        initialMoodHint: String? = null
+        initialMoodHint: String? = null,
+        recentHistory: List<Card> = emptyList()
     ): List<FeedCardItem> {
         if (allCards.isEmpty()) return emptyList()
         val random = if (seed != null) Random(seed) else Random.Default
@@ -106,7 +112,8 @@ object AdaptiveFeedRanker {
                 amenedCardIds = amenedCardIds,
                 savedCardIds = savedCardIds,
                 random = random,
-                initialMoodHint = initialMoodHint
+                initialMoodHint = initialMoodHint,
+                recentHistory = recentHistory
             )
         }
 
@@ -116,20 +123,31 @@ object AdaptiveFeedRanker {
         }.sortedByDescending { it.second }
 
         // 4. Partition into Best Matches (70%), Adjacent (20%), Wildcards (10%), adjusting for confidence
-        val topTopic = betaProfile.topValue(BetaDimension.TOPIC)
-            ?: onboardingPrefs.goal.lowercase()
+        val learnedTopTopic = betaProfile.topValue(BetaDimension.TOPIC)
+        val topTopic = learnedTopTopic ?: onboardingPrefs.goal.lowercase()
         val adjacentSet = ADJACENT_TOPICS[topTopic.lowercase()] ?: emptySet()
+        val dominantMood = userState.moodBelief.maxByOrNull { it.value }?.key
 
         val totalCount = scoredPool.size
         val (bestShare, adjacentShare, wildcardShare) = computeMixRatios(userState.confidence)
 
-        val wildcardCandidates = scoredPool.filter { (card, _) ->
-            isWildcard(card, betaProfile, topTopic, adjacentSet)
-        }.map { it.first }.toMutableList()
+        val wildcardCandidates = if (learnedTopTopic != null) {
+            scoredPool.filter { (card, _) ->
+                isWildcard(card, betaProfile, topTopic, adjacentSet, dominantMood)
+            }.map { it.first }.toMutableList()
+        } else {
+            // Before any topic has positive affinity, keep unseen topics in best/adjacent
+            // and reserve unseen formats or lower-scoring cards for the wildcard slot.
+            val cutoff = (scoredPool.size * 0.85f).toInt().coerceAtLeast(1)
+            scoredPool.filterIndexed { index, (card, _) ->
+                !betaProfile.hasSeenDimensionValue(BetaDimension.FORMAT, card.format) || index >= cutoff
+            }.map { it.first }.toMutableList()
+        }
 
         val adjacentCandidates = scoredPool.filter { (card, _) ->
             card !in wildcardCandidates &&
-                card.topics.any { it.lowercase() in adjacentSet }
+                card.topics.any { it.lowercase() in adjacentSet } &&
+                !(dominantMood != null && card.moods.any { it.equals(dominantMood, ignoreCase = true) })
         }.map { it.first }.toMutableList()
 
         val bestCandidates = scoredPool.filter { (card, _) ->
@@ -148,19 +166,21 @@ object AdaptiveFeedRanker {
 
         val wildcardIds = wildcardCandidates.map { it.id }.toSet()
         val rankedCards = mutableListOf<Card>()
+        val fatigueHistory = recentHistory.toMutableList()
         var comfortingCount = 0
-        val targetBestSteps = (10 * bestShare).roundToInt().coerceAtLeast(5)
-        val targetAdjacentSteps = (10 * adjacentShare).roundToInt().coerceAtLeast(1)
+        val targetBestSteps = (20 * bestShare).roundToInt().coerceAtLeast(10)
+        val targetAdjacentSteps = (20 * adjacentShare).roundToInt().coerceAtLeast(2)
 
-        var step = 0
+        var step = swipeCount
         while (bestCandidates.isNotEmpty() || adjacentCandidates.isNotEmpty() ||
             wildcardCandidates.isNotEmpty() || pendingSeriesCards.isNotEmpty()
         ) {
-            // Insert pending series continuation within the first 1..3 cards (or as soon as valid)
+            // Insert pending series continuation within the first 1..3 cards (respecting fatigue rules)
             if (pendingSeriesCards.isNotEmpty() && rankedCards.size in 0 until AdaptiveRankerConfig.SERIES_INSERT_WINDOW_MAX) {
-                val seriesCandidate = pickValidWithRelaxation(pendingSeriesCards, rankedCards)
+                val seriesCandidate = pickValid(pendingSeriesCards, fatigueHistory)
                 if (seriesCandidate != null) {
                     rankedCards.add(seriesCandidate)
+                    fatigueHistory.add(seriesCandidate)
                     if (seriesCandidate.tone.equals("comforting", ignoreCase = true)) comfortingCount++
                     step++
                     continue
@@ -170,45 +190,61 @@ object AdaptiveFeedRanker {
             val needComfort = userState.isCareModeActive &&
                 (comfortingCount.toFloat() / (rankedCards.size + 1).toFloat()) < 0.60f
 
-            val cyclePos = step % 10
+            val cyclePos = step % 20
             val candidate = if (needComfort) {
-                pickComfortingValid(bestCandidates, rankedCards)
-                    ?: pickComfortingValid(adjacentCandidates, rankedCards)
-                    ?: pickComfortingValid(wildcardCandidates, rankedCards)
-                    ?: pickValid(bestCandidates, rankedCards)
-                    ?: pickValid(adjacentCandidates, rankedCards)
-                    ?: pickValid(wildcardCandidates, rankedCards)
+                when {
+                    cyclePos < targetBestSteps -> {
+                        pickComfortingValid(bestCandidates, fatigueHistory)
+                            ?: pickComfortingValid(adjacentCandidates, fatigueHistory)
+                            ?: pickComfortingValid(wildcardCandidates, fatigueHistory)
+                    }
+                    cyclePos < targetBestSteps + targetAdjacentSteps -> {
+                        pickComfortingValid(adjacentCandidates, fatigueHistory)
+                            ?: pickComfortingValid(bestCandidates, fatigueHistory)
+                            ?: pickComfortingValid(wildcardCandidates, fatigueHistory)
+                    }
+                    else -> {
+                        pickComfortingValid(wildcardCandidates, fatigueHistory)
+                            ?: pickComfortingValid(adjacentCandidates, fatigueHistory)
+                            ?: pickComfortingValid(bestCandidates, fatigueHistory)
+                    }
+                }
+                    ?: pickValid(bestCandidates, fatigueHistory)
+                    ?: pickValid(adjacentCandidates, fatigueHistory)
+                    ?: pickValid(wildcardCandidates, fatigueHistory)
             } else {
                 when {
                     cyclePos < targetBestSteps -> {
-                        pickValid(bestCandidates, rankedCards)
-                            ?: pickValid(adjacentCandidates, rankedCards)
-                            ?: pickValid(wildcardCandidates, rankedCards)
+                        pickValid(bestCandidates, fatigueHistory)
+                            ?: pickValid(adjacentCandidates, fatigueHistory)
+                            ?: pickValid(wildcardCandidates, fatigueHistory)
                     }
                     cyclePos < targetBestSteps + targetAdjacentSteps -> {
-                        pickValid(adjacentCandidates, rankedCards)
-                            ?: pickValid(bestCandidates, rankedCards)
-                            ?: pickValid(wildcardCandidates, rankedCards)
+                        pickValid(adjacentCandidates, fatigueHistory)
+                            ?: pickValid(bestCandidates, fatigueHistory)
+                            ?: pickValid(wildcardCandidates, fatigueHistory)
                     }
                     else -> {
-                        pickValid(wildcardCandidates, rankedCards)
-                            ?: pickValid(adjacentCandidates, rankedCards)
-                            ?: pickValid(bestCandidates, rankedCards)
+                        pickValid(wildcardCandidates, fatigueHistory)
+                            ?: pickValid(adjacentCandidates, fatigueHistory)
+                            ?: pickValid(bestCandidates, fatigueHistory)
                     }
                 }
             }
 
             if (candidate != null) {
                 rankedCards.add(candidate)
+                fatigueHistory.add(candidate)
                 if (candidate.tone.equals("comforting", ignoreCase = true)) comfortingCount++
             } else {
                 // Relaxed fallback while still respecting format/book fatigue if possible
-                val fallback = pickValidWithRelaxation(bestCandidates, rankedCards)
-                    ?: pickValidWithRelaxation(adjacentCandidates, rankedCards)
-                    ?: pickValidWithRelaxation(wildcardCandidates, rankedCards)
-                    ?: pickValidWithRelaxation(pendingSeriesCards, rankedCards)
+                val fallback = pickValidWithRelaxation(bestCandidates, fatigueHistory)
+                    ?: pickValidWithRelaxation(adjacentCandidates, fatigueHistory)
+                    ?: pickValidWithRelaxation(wildcardCandidates, fatigueHistory)
+                    ?: pickValidWithRelaxation(pendingSeriesCards, fatigueHistory)
                 if (fallback != null) {
                     rankedCards.add(fallback)
+                    fatigueHistory.add(fallback)
                     if (fallback.tone.equals("comforting", ignoreCase = true)) comfortingCount++
                 } else {
                     break
@@ -241,7 +277,7 @@ object AdaptiveFeedRanker {
         // Confidence in [0, 1]. Low confidence raises exploration while keeping wildcard >= 10%.
         val clampedConf = confidence.coerceIn(0f, 1f)
         val extraExploration = if (clampedConf < 0.5f) {
-            ((0.5f - clampedConf) / 0.5f) * 0.20f
+            ((0.5f - clampedConf) / 0.5f) * 0.12f
         } else {
             0f
         }
@@ -357,14 +393,17 @@ object AdaptiveFeedRanker {
         card: Card,
         betaProfile: LongTermBetaProfile,
         topTopic: String,
-        adjacentSet: Set<String>
+        adjacentSet: Set<String>,
+        dominantMood: String? = null
     ): Boolean {
         val isNewFormat = !betaProfile.hasSeenDimensionValue(BetaDimension.FORMAT, card.format)
         val isNewTopic = card.topics.any { !betaProfile.hasSeenDimensionValue(BetaDimension.TOPIC, it) }
+        val matchesDominantMood = dominantMood != null &&
+            card.moods.any { it.equals(dominantMood, ignoreCase = true) }
         val isOutsideCoreTopics = card.topics.none {
             it.equals(topTopic, ignoreCase = true) || it.lowercase() in adjacentSet
         }
-        return isNewFormat || isNewTopic || isOutsideCoreTopics
+        return isNewFormat || isNewTopic || (isOutsideCoreTopics && !matchesDominantMood)
     }
 
     private fun buildNewUserFormatComparisonFeed(
@@ -375,18 +414,33 @@ object AdaptiveFeedRanker {
         amenedCardIds: Set<String>,
         savedCardIds: Set<String>,
         random: Random,
-        initialMoodHint: String? = null
+        initialMoodHint: String? = null,
+        recentHistory: List<Card> = emptyList()
     ): List<FeedCardItem> {
         // Choose a single focus topic for the first 15 cards so formats can be compared cleanly
-        val dominantMood = userState.moodBelief.maxByOrNull { it.value }?.key
-        val focusTopic = pool
-            .filter { card -> dominantMood != null && card.moods.any { it.equals(dominantMood, ignoreCase = true) } }
-            .flatMap { it.topics }
-            .groupingBy { it.lowercase() }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-            ?: onboardingPrefs.goal.lowercase()
+        val goalTopic = onboardingPrefs.goal.lowercase().trim()
+        val hasGoalCards = goalTopic.isNotBlank() && pool.any { card ->
+            card.topics.any { it.equals(goalTopic, ignoreCase = true) }
+        }
+        val dominantMood = if (userState.confidence >= 0.15f) {
+            userState.moodBelief.maxByOrNull { it.value }?.key
+        } else {
+            null
+        }
+        val focusTopic = if (dominantMood != null) {
+            pool
+                .filter { card -> card.moods.any { it.equals(dominantMood, ignoreCase = true) } }
+                .flatMap { it.topics }
+                .groupingBy { it.lowercase() }
+                .eachCount()
+                .maxByOrNull { it.value }
+                ?.key
+                ?: goalTopic
+        } else if (hasGoalCards) {
+            goalTopic
+        } else {
+            pool.flatMap { it.topics }.groupingBy { it.lowercase() }.eachCount().maxByOrNull { it.value }?.key ?: goalTopic
+        }
 
         val topicCards = pool.filter { card ->
             card.topics.any { it.equals(focusTopic, ignoreCase = true) }
@@ -395,6 +449,7 @@ object AdaptiveFeedRanker {
         val remainingPool = pool.filterNot { it in topicCards }.shuffled(random).toMutableList()
 
         val result = mutableListOf<Card>()
+        val fatigueHistory = recentHistory.toMutableList()
         var comfortingCount = 0
         val targetFormats = listOf("verse", "story", "didyouknow", "question")
         var formatCursor = 0
@@ -409,26 +464,27 @@ object AdaptiveFeedRanker {
                 (comfortingCount.toFloat() / (result.size + 1).toFloat()) < 0.60f
 
             val picked = if (needComfort) {
-                pickComfortingValid(topicCards, result)
-                    ?: pickComfortingValid(remainingPool, result)
-                    ?: pickMatchingFormat(topicCards, desiredFormat, result)
-                    ?: pickValid(topicCards, result)
-                    ?: pickMatchingFormat(remainingPool, desiredFormat, result)
-                    ?: pickValid(remainingPool, result)
-                    ?: pickValidWithRelaxation(topicCards, result)
-                    ?: pickValidWithRelaxation(remainingPool, result)
+                pickComfortingValid(topicCards, fatigueHistory)
+                    ?: pickComfortingValid(remainingPool, fatigueHistory)
+                    ?: pickMatchingFormat(topicCards, desiredFormat, fatigueHistory)
+                    ?: pickValid(topicCards, fatigueHistory)
+                    ?: pickMatchingFormat(remainingPool, desiredFormat, fatigueHistory)
+                    ?: pickValid(remainingPool, fatigueHistory)
+                    ?: pickValidWithRelaxation(topicCards, fatigueHistory)
+                    ?: pickValidWithRelaxation(remainingPool, fatigueHistory)
                     ?: break
             } else {
-                pickMatchingFormat(topicCards, desiredFormat, result)
-                    ?: pickValid(topicCards, result)
-                    ?: pickMatchingFormat(remainingPool, desiredFormat, result)
-                    ?: pickValid(remainingPool, result)
-                    ?: pickValidWithRelaxation(topicCards, result)
-                    ?: pickValidWithRelaxation(remainingPool, result)
+                pickMatchingFormat(topicCards, desiredFormat, fatigueHistory)
+                    ?: pickValid(topicCards, fatigueHistory)
+                    ?: pickMatchingFormat(remainingPool, desiredFormat, fatigueHistory)
+                    ?: pickValid(remainingPool, fatigueHistory)
+                    ?: pickValidWithRelaxation(topicCards, fatigueHistory)
+                    ?: pickValidWithRelaxation(remainingPool, fatigueHistory)
                     ?: break
             }
 
             result.add(picked)
+            fatigueHistory.add(picked)
             if (picked.tone.equals("comforting", ignoreCase = true)) comfortingCount++
         }
 
@@ -437,21 +493,22 @@ object AdaptiveFeedRanker {
             val needComfort = userState.isCareModeActive &&
                 (comfortingCount.toFloat() / (result.size + 1).toFloat()) < 0.60f
             val next = if (needComfort) {
-                pickComfortingValid(topicCards, result)
-                    ?: pickComfortingValid(remainingPool, result)
-                    ?: pickValid(topicCards, result)
-                    ?: pickValid(remainingPool, result)
-                    ?: pickValidWithRelaxation(topicCards, result)
-                    ?: pickValidWithRelaxation(remainingPool, result)
+                pickComfortingValid(topicCards, fatigueHistory)
+                    ?: pickComfortingValid(remainingPool, fatigueHistory)
+                    ?: pickValid(topicCards, fatigueHistory)
+                    ?: pickValid(remainingPool, fatigueHistory)
+                    ?: pickValidWithRelaxation(topicCards, fatigueHistory)
+                    ?: pickValidWithRelaxation(remainingPool, fatigueHistory)
                     ?: break
             } else {
-                pickValid(topicCards, result)
-                    ?: pickValid(remainingPool, result)
-                    ?: pickValidWithRelaxation(topicCards, result)
-                    ?: pickValidWithRelaxation(remainingPool, result)
+                pickValid(topicCards, fatigueHistory)
+                    ?: pickValid(remainingPool, fatigueHistory)
+                    ?: pickValidWithRelaxation(topicCards, fatigueHistory)
+                    ?: pickValidWithRelaxation(remainingPool, fatigueHistory)
                     ?: break
             }
             result.add(next)
+            fatigueHistory.add(next)
             if (next.tone.equals("comforting", ignoreCase = true)) comfortingCount++
         }
 
@@ -482,11 +539,7 @@ object AdaptiveFeedRanker {
         val idx = pool.indexOfFirst {
             it.tone.equals("comforting", ignoreCase = true) && satisfiesFatigue(it, current)
         }
-        if (idx != -1) return pool.removeAt(idx)
-        val relaxedIdx = pool.indexOfFirst {
-            it.tone.equals("comforting", ignoreCase = true) && satisfiesFormatAndBookFatigue(it, current)
-        }
-        return if (relaxedIdx != -1) pool.removeAt(relaxedIdx) else null
+        return if (idx != -1) pool.removeAt(idx) else null
     }
 
     private fun pickMatchingFormat(
@@ -521,6 +574,9 @@ object AdaptiveFeedRanker {
 
     private fun pickValidWithRelaxation(pool: MutableList<Card>, current: List<Card>): Card? {
         if (pool.isEmpty()) return null
+        val fullFatigueOk = pool.indexOfFirst { satisfiesFatigue(it, current) }
+        if (fullFatigueOk != -1) return pool.removeAt(fullFatigueOk)
+
         val formatAndBookOk = pool.indexOfFirst { satisfiesFormatAndBookFatigue(it, current) }
         if (formatAndBookOk != -1) return pool.removeAt(formatAndBookOk)
 

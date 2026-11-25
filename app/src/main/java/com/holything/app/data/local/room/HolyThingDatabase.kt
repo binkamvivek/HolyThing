@@ -15,6 +15,7 @@ import com.holything.app.data.local.room.entity.BetaAffinityEntity
 import com.holything.app.data.local.room.entity.CardEntity
 import com.holything.app.data.local.room.entity.InteractionEntity
 import com.holything.app.data.local.room.entity.JournalNoteEntity
+import com.holything.app.data.local.room.entity.MoodBaselineEntity
 import com.holything.app.data.local.room.entity.ReadingDayEntity
 import com.holything.app.data.local.room.entity.SavedCardEntity
 import com.holything.app.data.local.room.entity.SessionSummaryEntity
@@ -29,9 +30,10 @@ import com.holything.app.data.local.room.entity.SignalEventEntity
         ReadingDayEntity::class,
         SignalEventEntity::class,
         SessionSummaryEntity::class,
-        BetaAffinityEntity::class
+        BetaAffinityEntity::class,
+        MoodBaselineEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(StringListConverter::class)

@@ -98,6 +98,7 @@ data class LongTermBetaProfile(
     fun topValue(dimension: String): String? {
         return entries
             .filterKeys { it.first == dimension }
+            .filterValues { it.mean() >= 0.5f }
             .maxByOrNull { it.value.mean() * (1f + it.value.totalTrials.coerceAtMost(10f) * 0.05f) }
             ?.key
             ?.second

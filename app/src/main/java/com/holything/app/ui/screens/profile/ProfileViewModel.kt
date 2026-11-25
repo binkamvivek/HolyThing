@@ -3,15 +3,21 @@ package com.holything.app.ui.screens.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.holything.app.core.reminder.ReminderScheduler
+import com.holything.app.core.signal.SignalCaptureManager
 import com.holything.app.data.local.datastore.UserPreferencesDataStore
+import com.holything.app.data.local.room.entity.SignalEventEntity
 import com.holything.app.data.repository.ContentRepository
 import com.holything.app.domain.model.StreakInfo
+import com.holything.app.domain.state.UserStateEstimate
+import com.holything.app.domain.state.UserStateEstimator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -34,11 +40,20 @@ data class ProfileUiState(
 class ProfileViewModel @Inject constructor(
     private val dataStore: UserPreferencesDataStore,
     private val repository: ContentRepository,
-    private val reminderScheduler: ReminderScheduler
+    private val reminderScheduler: ReminderScheduler,
+    private val signalCaptureManager: SignalCaptureManager,
+    private val userStateEstimator: UserStateEstimator
 ) : ViewModel() {
 
     private val _messageEvent = MutableSharedFlow<String>()
     val messageEvent: SharedFlow<String> = _messageEvent.asSharedFlow()
+
+    val userState: StateFlow<UserStateEstimate> = userStateEstimator.state
+    val recentServedCards: StateFlow<List<SignalCaptureManager.ServedCardDebugInfo>> =
+        signalCaptureManager.recentServedCards
+
+    private val _recentSignalEvents = MutableStateFlow<List<SignalEventEntity>>(emptyList())
+    val recentSignalEvents: StateFlow<List<SignalEventEntity>> = _recentSignalEvents.asStateFlow()
 
     private data class ReminderPrefs(
         val enabled: Boolean,
@@ -207,9 +222,24 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    fun loadDebugSnapshot() {
+        viewModelScope.launch {
+            _recentSignalEvents.value = repository.getRecentSignalEvents(20)
+        }
+    }
+
+    fun resetMyFeed() {
+        viewModelScope.launch {
+            signalCaptureManager.resetSessionState()
+            repository.resetFeedLearning()
+            _messageEvent.emit("Feed preferences and history reset.")
+        }
+    }
+
     fun deleteMyData() {
         viewModelScope.launch {
             reminderScheduler.cancelAllReminders()
+            signalCaptureManager.resetSessionState()
             repository.clearAllData()
         }
     }

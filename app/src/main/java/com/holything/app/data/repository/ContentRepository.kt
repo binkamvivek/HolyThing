@@ -30,8 +30,10 @@ import java.io.InputStreamReader
 import com.holything.app.data.local.room.dao.BetaProfileDao
 import com.holything.app.data.local.room.dao.JournalNoteDao
 import com.holything.app.data.local.room.dao.ReadingDayDao
+import com.holything.app.data.local.room.dao.SignalDao
 import com.holything.app.data.local.room.entity.JournalNoteEntity
 import com.holything.app.data.local.room.entity.ReadingDayEntity
+import com.holything.app.data.local.room.entity.SignalEventEntity
 import com.holything.app.domain.engine.StreakCalculator
 import com.holything.app.domain.model.StreakInfo
 import com.holything.app.domain.ranking.AdaptiveFeedRanker
@@ -53,6 +55,7 @@ class ContentRepository @Inject constructor(
     private val journalNoteDao: JournalNoteDao,
     private val readingDayDao: ReadingDayDao,
     private val betaProfileDao: BetaProfileDao,
+    private val signalDao: SignalDao,
     private val userStateEstimator: UserStateEstimator,
     private val dataStore: UserPreferencesDataStore,
     private val json: Json
@@ -386,12 +389,31 @@ class ContentRepository @Inject constructor(
         dataStore.saveTasteProfileJson(json.encodeToString(newProfile))
     }
 
+    suspend fun getRecentSignalEvents(limit: Int = 20): List<SignalEventEntity> = withContext(Dispatchers.IO) {
+        signalDao.getRecentEvents(limit)
+    }
+
+    suspend fun resetFeedLearning() = withContext(Dispatchers.IO) {
+        betaProfileDao.clearAll()
+        betaProfileDao.clearMoodBaseline()
+        interactionDao.clearAll()
+        signalDao.clearEvents()
+        signalDao.clearSummaries()
+        dataStore.setInitialMoodHint(null)
+        dataStore.resetSwipeCount()
+        userStateEstimator.startSession()
+    }
+
     suspend fun clearAllData() {
         cardDao.clearAll()
         interactionDao.clearAll()
         savedCardDao.clearAll()
         journalNoteDao.clearAll()
         readingDayDao.clearAll()
+        betaProfileDao.clearAll()
+        betaProfileDao.clearMoodBaseline()
+        signalDao.clearEvents()
+        signalDao.clearSummaries()
         dataStore.clearAll()
     }
 }

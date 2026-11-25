@@ -20,4 +20,13 @@ interface SignalDao {
 
     @Query("SELECT * FROM session_summaries WHERE sessionId = :sessionId LIMIT 1")
     suspend fun getSessionSummary(sessionId: String): SessionSummaryEntity?
+
+    @Query("SELECT * FROM signal_events ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentEvents(limit: Int = 20): List<SignalEventEntity>
+
+    @Query("DELETE FROM signal_events")
+    suspend fun clearEvents()
+
+    @Query("DELETE FROM session_summaries")
+    suspend fun clearSummaries()
 }

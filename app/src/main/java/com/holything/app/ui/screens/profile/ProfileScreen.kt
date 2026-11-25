@@ -7,8 +7,10 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,12 +73,13 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.holything.app.BuildConfig
 import com.holything.app.core.Constants
 import com.holything.app.domain.model.DayActivity
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel
@@ -85,8 +88,10 @@ fun ProfileScreen(
     val context = LocalContext.current
 
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showResetFeedConfirmDialog by remember { mutableStateOf(false) }
     var showSupportResourcesDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
+    var showDebugDialog by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -718,6 +723,13 @@ fun ProfileScreen(
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                     OutlinedButton(
+                        onClick = { showResetFeedConfirmDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Reset my feed")
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
                         onClick = { showDeleteConfirmDialog = true },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
@@ -729,8 +741,52 @@ fun ProfileScreen(
                 }
             }
 
+            Text(
+                text = "Version ${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            if (BuildConfig.DEBUG) {
+                                viewModel.loadDebugSnapshot()
+                                showDebugDialog = true
+                            }
+                        }
+                    )
+                    .padding(vertical = 8.dp)
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    // Reset Feed Confirmation Dialog
+    if (showResetFeedConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetFeedConfirmDialog = false },
+            title = { Text("Reset your feed?") },
+            text = {
+                Text("This will clear your learned feed profile, mood baseline, and interaction history so your feed starts fresh. Your saved verses, journal notes, and streaks will be kept.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.resetMyFeed()
+                        showResetFeedConfirmDialog = false
+                    }
+                ) {
+                    Text("Reset Feed")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetFeedConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Delete Confirmation Dialog
@@ -804,15 +860,15 @@ fun ProfileScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "• Everything stays on your device: HolyThing is designed with zero third-party trackers, zero data selling, and zero behavioral telemetry.",
+                        text = "• Everything personal stays on your device: Mood inference, scroll signals, dwell times, saved verses, and journal notes are processed and stored locally on this phone only.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "• Your prayers and reflections are private: Journal notes and dwell times are processed on your phone only.",
+                        text = "• What crosses the network: Only a read-only request to fetch new Scripture cards (with the local catalog version) is sent to the server. No mood beliefs, scroll events, or interactions are ever uploaded.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "• Complete control: You can erase everything anytime using the 'Delete my data' button.",
+                        text = "• Complete control: Reset your feed learning anytime with 'Reset my feed', or erase everything with 'Delete my data'.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -822,6 +878,18 @@ fun ProfileScreen(
                     Text("Understood")
                 }
             }
+        )
+    }
+
+    if (BuildConfig.DEBUG && showDebugDialog) {
+        val debugUserState by viewModel.userState.collectAsState()
+        val debugEvents by viewModel.recentSignalEvents.collectAsState()
+        val debugServed by viewModel.recentServedCards.collectAsState()
+        FeedDebugDialog(
+            userState = debugUserState,
+            recentEvents = debugEvents,
+            recentServedCards = debugServed,
+            onDismiss = { showDebugDialog = false }
         )
     }
 }
